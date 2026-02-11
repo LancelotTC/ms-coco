@@ -1,7 +1,10 @@
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DATASET_FOLDER = Path.home() / "ms-coco-dataset"
+LOCAL_FOLDER = Path.home() / "ms-coco"
+
+DATASET_FOLDER = LOCAL_FOLDER / "ms-coco-dataset"
+PRETRAINED_MODELS_FOLDER = LOCAL_FOLDER / "pre-trained_models"
 
 IMAGES_DIR = DATASET_FOLDER / "images"
 LABELS_DIR = DATASET_FOLDER / "labels"
@@ -9,6 +12,7 @@ LABELS_DIR = DATASET_FOLDER / "labels"
 TRAIN_IMAGES_DIR = IMAGES_DIR / "train-resized"
 TEST_IMAGES_DIR = IMAGES_DIR / "test-resized"
 TRAIN_LABELS_DIR = LABELS_DIR / "train"
+
 
 NUM_CLASSES = 80
 MODEL_NAME = "resnet18"

@@ -34,7 +34,7 @@ def validation_loop(
     criterion: torch.nn.Module,
     num_classes: int,
     device: torch.device,
-    multi_label: bool = False,
+    multi_label: bool = True,
     th_multi_label: float = 0.5,
     one_hot: bool = False,
     class_metrics: bool = False,
