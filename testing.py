@@ -1,23 +1,59 @@
-# import statements for python, torch and companion libraries and your own modules
-# TIP: use the python standard json module to write python dictionaries as JSON files
+import json
+from pathlib import Path
 
-# global variables defining inference hyper-parameters among other things
-# DON'T forget the multi-label classification probability threshold
+import torch
+from torch.utils.data import DataLoader
+from torchvision import models
 
-# data, trained model and output directories/filenames initialization
+from config import NUM_CLASSES, TEST_IMAGES_DIR
+from dataset_readers import COCOTestImageDataset
 
-# device initialization
 
-# instantiation of transforms, dataset and data loader
+BATCH_SIZE = 32
+NUM_WORKERS = 0
+TH_MULTI_LABEL = 0.5
 
-# load network model from saved file
+MODEL_PATH = Path("models/best_model.pt")
+OUTPUT_PATH = Path("predictions.json")
 
-# initialize output dictionary
 
-# prediction loop over test_loader
-#    get mini-batch
-#    compute network output
-#    threshold network output
-#    update dictionary entries write corresponding class indices
+def main() -> None:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# write JSON file
+    weights = models.ResNet18_Weights.DEFAULT
+    transform = weights.transforms()
+
+    test_dataset = COCOTestImageDataset(TEST_IMAGES_DIR, transform=transform)
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+    )
+
+    net = models.resnet18(weights=weights)
+    net.fc = torch.nn.Sequential(
+        torch.nn.Linear(net.fc.in_features, NUM_CLASSES),
+        torch.nn.Sigmoid(),
+    )
+    net.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+    net = net.to(device)
+    net.eval()
+
+    output = {}
+    with torch.no_grad():
+        for images, names in test_loader:
+            images = images.to(device)
+            outputs = net(images)
+            predictions = outputs > TH_MULTI_LABEL
+            for i, name in enumerate(names):
+                indices = predictions[i].nonzero(as_tuple=False).squeeze(1).tolist()
+                output[name] = indices
+
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_PATH.open("w", encoding="utf-8") as f:
+        json.dump(output, f, indent=4)
+
+
+if __name__ == "__main__":
+    main()
