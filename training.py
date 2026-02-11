@@ -1,9 +1,7 @@
-from pathlib import Path
-
 import torch
 from torch.utils.data import DataLoader, random_split
 
-from config import MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
+from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
 from dataset_readers import COCOTrainImageDataset
 from models_factory import AVAILABLE_MODELS, create_model, freeze_all
 from utils import train_loop, validation_loop
@@ -29,7 +27,7 @@ TH_MULTI_LABEL = 0.5
 MBATCH_LOSS_GROUP = -1
 
 USE_TENSORBOARD = False
-MODEL_PATH = Path("models/best_model.pt")
+MODEL_PATH = BEST_MODEL_PATH
 
 
 def main() -> None:

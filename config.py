@@ -5,6 +5,7 @@ LOCAL_FOLDER = Path.home() / "ms-coco"
 
 DATASET_FOLDER = LOCAL_FOLDER / "ms-coco-dataset"
 PRETRAINED_MODELS_FOLDER = LOCAL_FOLDER / "pre-trained_models"
+TRAINED_MODELS_FOLDER = LOCAL_FOLDER / "trained_models"
 
 IMAGES_DIR = DATASET_FOLDER / "images"
 LABELS_DIR = DATASET_FOLDER / "labels"
@@ -16,6 +17,7 @@ TRAIN_LABELS_DIR = LABELS_DIR / "train"
 
 NUM_CLASSES = 80
 MODEL_NAME = "resnet18"
+BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
 
 CLASSES = (
     "person",

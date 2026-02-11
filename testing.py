@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from config import MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
+from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
 from dataset_readers import COCOTestImageDataset
 from models_factory import AVAILABLE_MODELS, create_model
 
@@ -13,7 +13,7 @@ BATCH_SIZE = 32
 NUM_WORKERS = 0
 TH_MULTI_LABEL = 0.5
 
-MODEL_PATH = Path("models/best_model.pt")
+MODEL_PATH = BEST_MODEL_PATH
 OUTPUT_PATH = Path("predictions.json")
 
 
