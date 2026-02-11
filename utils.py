@@ -1,7 +1,14 @@
 import torch
 
 
-def train_loop(train_loader, net, criterion, optimizer, device, mbatch_loss_group=-1):
+def train_loop(
+    train_loader: torch.utils.data.DataLoader,
+    net: torch.nn.Module,
+    criterion: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    mbatch_loss_group: int = -1,
+):
     net.train()
     running_loss = 0.0
     mbatch_losses = []
@@ -22,15 +29,15 @@ def train_loop(train_loader, net, criterion, optimizer, device, mbatch_loss_grou
 
 
 def validation_loop(
-    val_loader,
-    net,
-    criterion,
-    num_classes,
-    device,
-    multi_label=False,
-    th_multi_label=0.5,
-    one_hot=False,
-    class_metrics=False,
+    val_loader: torch.utils.data.DataLoader,
+    net: torch.nn.Module,
+    criterion: torch.nn.Module,
+    num_classes: int,
+    device: torch.device,
+    multi_label: bool = False,
+    th_multi_label: float = 0.5,
+    one_hot: bool = False,
+    class_metrics: bool = False,
 ):
     net.eval()
     loss = 0
