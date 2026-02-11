@@ -2,10 +2,10 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader, random_split
-from torchvision import models
 
-from config import NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
+from config import MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
 from dataset_readers import COCOTrainImageDataset
+from models_factory import AVAILABLE_MODELS, create_model, freeze_all
 from utils import train_loop, validation_loop
 
 try:
@@ -29,20 +29,17 @@ TH_MULTI_LABEL = 0.5
 MBATCH_LOSS_GROUP = -1
 
 USE_TENSORBOARD = False
-MODEL_PATH = Path.home() / "models" / "best_model.pt"
+MODEL_PATH = Path("models/best_model.pt")
 
 
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    weights = models.ResNet18_Weights.DEFAULT
-    transform = weights.transforms()
+    net, transform, head_params = create_model(MODEL_NAME, NUM_CLASSES, pretrained=True)
+    if transform is None:
+        raise RuntimeError("No transform available. Use a pretrained model or provide a custom transform.")
 
-    full_dataset = COCOTrainImageDataset(
-        TRAIN_IMAGES_DIR,
-        TRAIN_LABELS_DIR,
-        transform=transform,
-    )
+    full_dataset = COCOTrainImageDataset(TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR, transform=transform)
 
     val_size = max(1, int(len(full_dataset) * VAL_SPLIT))
     train_size = len(full_dataset) - val_size
@@ -65,17 +62,13 @@ def main() -> None:
         num_workers=NUM_WORKERS,
     )
 
-    net = models.resnet18(weights=weights)
-    for param in net.parameters():
-        param.requires_grad = False
-    net.fc = torch.nn.Sequential(
-        torch.nn.Linear(net.fc.in_features, NUM_CLASSES),
-        torch.nn.Sigmoid(),
-    )
+    freeze_all(net)
+    for param in head_params:
+        param.requires_grad = True
     net = net.to(device)
 
     criterion = torch.nn.BCELoss()
-    optimizer = torch.optim.Adam(net.fc.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(head_params, lr=LEARNING_RATE)
 
     best_metric = -1.0
     summary_writer = None
@@ -128,7 +121,7 @@ def main() -> None:
         if current_metric > best_metric:
             best_metric = current_metric
             MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(net.state_dict(), MODEL_PATH)
+            torch.save({"model_name": MODEL_NAME, "state_dict": net.state_dict()}, MODEL_PATH)
 
         print(
             f"Epoch {epoch + 1}/{NUM_EPOCHS} "
@@ -142,4 +135,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if MODEL_NAME not in AVAILABLE_MODELS:
+        raise ValueError(f"MODEL_NAME must be one of: {', '.join(AVAILABLE_MODELS)}")
     main()

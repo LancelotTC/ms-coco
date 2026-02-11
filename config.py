@@ -11,6 +11,7 @@ TEST_IMAGES_DIR = IMAGES_DIR / "test-resized"
 TRAIN_LABELS_DIR = LABELS_DIR / "train"
 
 NUM_CLASSES = 80
+MODEL_NAME = "resnet18"
 
 CLASSES = (
     "person",

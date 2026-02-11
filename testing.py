@@ -3,10 +3,10 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
-from torchvision import models
 
-from config import NUM_CLASSES, TEST_IMAGES_DIR
+from config import MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
 from dataset_readers import COCOTestImageDataset
+from models_factory import AVAILABLE_MODELS, create_model
 
 
 BATCH_SIZE = 32
@@ -20,8 +20,14 @@ OUTPUT_PATH = Path("predictions.json")
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    weights = models.ResNet18_Weights.DEFAULT
-    transform = weights.transforms()
+    checkpoint = torch.load(MODEL_PATH, map_location=device)
+    model_name = checkpoint.get("model_name", MODEL_NAME)
+    if model_name not in AVAILABLE_MODELS:
+        raise ValueError(f"Model '{model_name}' not supported. Available: {', '.join(AVAILABLE_MODELS)}")
+
+    net, transform, _ = create_model(model_name, NUM_CLASSES, pretrained=True)
+    if transform is None:
+        raise RuntimeError("No transform available. Use a pretrained model or provide a custom transform.")
 
     test_dataset = COCOTestImageDataset(TEST_IMAGES_DIR, transform=transform)
     test_loader = DataLoader(
@@ -31,12 +37,7 @@ def main() -> None:
         num_workers=NUM_WORKERS,
     )
 
-    net = models.resnet18(weights=weights)
-    net.fc = torch.nn.Sequential(
-        torch.nn.Linear(net.fc.in_features, NUM_CLASSES),
-        torch.nn.Sigmoid(),
-    )
-    net.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+    net.load_state_dict(checkpoint["state_dict"])
     net = net.to(device)
     net.eval()
 
@@ -56,4 +57,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if MODEL_NAME not in AVAILABLE_MODELS:
+        raise ValueError(f"MODEL_NAME must be one of: {', '.join(AVAILABLE_MODELS)}")
     main()
