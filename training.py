@@ -16,7 +16,7 @@ except ModuleNotFoundError:
     TENSORBOARD_AVAILABLE = False
 
 
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 NUM_EPOCHS = 5
 LEARNING_RATE = 1e-3
 VAL_SPLIT = 0.1
@@ -32,6 +32,7 @@ MODEL_PATH = BEST_MODEL_PATH
 
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device.type}")
 
     net, transform, head_params = create_model(MODEL_NAME, NUM_CLASSES, pretrained=True)
     if transform is None:
@@ -81,6 +82,7 @@ def main() -> None:
             optimizer,
             device,
             mbatch_loss_group=MBATCH_LOSS_GROUP,
+            progress_label="train",
         )
 
         train_results = validation_loop(
@@ -92,6 +94,7 @@ def main() -> None:
             multi_label=True,
             th_multi_label=TH_MULTI_LABEL,
             one_hot=True,
+            progress_label="train-val",
         )
         val_results = validation_loop(
             val_loader,
@@ -102,6 +105,7 @@ def main() -> None:
             multi_label=True,
             th_multi_label=TH_MULTI_LABEL,
             one_hot=True,
+            progress_label="val",
         )
 
         if summary_writer:

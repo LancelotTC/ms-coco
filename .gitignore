@@ -3,3 +3,6 @@
 
 tempCodeRunnerFile.*
 *.ipynb
+
+__pycache__/
+predictions.json

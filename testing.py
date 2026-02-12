@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
 from dataset_readers import COCOTestImageDataset
 from models_factory import AVAILABLE_MODELS, create_model
+from utils import ProgressBar
 
 
 BATCH_SIZE = 32
@@ -42,6 +43,10 @@ def main() -> None:
     net.eval()
 
     output = {}
+    progress_bar = None
+    total_batches = len(test_loader)
+    if total_batches > 0:
+        progress_bar = ProgressBar(total=total_batches, start_at=0, label="test")
     with torch.no_grad():
         for images, names in test_loader:
             images = images.to(device)
@@ -50,6 +55,10 @@ def main() -> None:
             for i, name in enumerate(names):
                 indices = predictions[i].nonzero(as_tuple=False).squeeze(1).tolist()
                 output[name] = indices
+            if progress_bar:
+                progress_bar.increment()
+    if progress_bar:
+        progress_bar.finish()
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with OUTPUT_PATH.open("w", encoding="utf-8") as f:
