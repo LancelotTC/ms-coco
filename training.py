@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, random_split
 
-from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
+from config import BEST_MODEL_PATH, FREEZE_BACKBONE, MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
 from dataset_readers import COCOTrainImageDataset
 from models_factory import AVAILABLE_MODELS, create_model, freeze_all
 from utils import train_loop, validation_loop
@@ -61,13 +61,21 @@ def main() -> None:
         num_workers=NUM_WORKERS,
     )
 
-    freeze_all(net)
-    for param in head_params:
-        param.requires_grad = True
+    if FREEZE_BACKBONE:
+        freeze_all(net)
+        for param in head_params:
+            param.requires_grad = True
+        trainable_params = list(head_params)
+        print("Training mode: frozen backbone (head-only fine-tuning)")
+    else:
+        for param in net.parameters():
+            param.requires_grad = True
+        trainable_params = [param for param in net.parameters() if param.requires_grad]
+        print("Training mode: unfrozen backbone (full-model fine-tuning)")
     net = net.to(device)
 
     criterion = torch.nn.BCELoss()
-    optimizer = torch.optim.Adam(head_params, lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(trainable_params, lr=LEARNING_RATE)
 
     best_metric = -1.0
     summary_writer = None

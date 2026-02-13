@@ -2,7 +2,7 @@
 
 This project trains and evaluates an image multi-label classifier on an MS-COCO style dataset using transfer learning in PyTorch.
 
-It supports multiple torchvision backbones, replaces the final classification head with an 80-class sigmoid head, trains on one-hot multi-label targets, and exports test predictions to JSON.
+It supports multiple torchvision backbones, replaces the final classification head with an 80-class `Linear -> BatchNorm1d -> Sigmoid` head, trains on one-hot multi-label targets, and exports test predictions to JSON.
 
 ## What This Repository Contains
 
@@ -70,6 +70,7 @@ Edit `config.py` to set:
 - `MODEL_NAME` (default: `resnet18`)
 - directory constants if you do not use the default `~/ms-coco` layout
 - `BEST_MODEL_PATH` (checkpoint output path)
+- `FREEZE_BACKBONE` (`True` = train head only, `False` = train all layers)
 
 Edit `training.py` / `testing.py` for runtime hyperparameters:
 
@@ -87,8 +88,8 @@ python training.py
 Behavior:
 
 - Loads pretrained backbone weights from torchvision.
-- Freezes all backbone parameters.
-- Trains only the replaced classifier head (`Linear -> Sigmoid`) with `BCELoss`.
+- Uses `FREEZE_BACKBONE` from `config.py` to choose mode (`True`: trains only the replaced classifier head `Linear -> BatchNorm1d -> Sigmoid`, `False`: trains full model parameters).
+- Uses `BCELoss` for optimization.
 - Splits training data into train/validation (`VAL_SPLIT`).
 - Saves best model by validation F1 score to `BEST_MODEL_PATH`.
 

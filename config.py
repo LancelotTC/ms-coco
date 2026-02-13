@@ -16,8 +16,9 @@ TRAIN_LABELS_DIR = LABELS_DIR / "train"
 
 
 NUM_CLASSES = 80
-MODEL_NAME = "resnet18"
+MODEL_NAME = "mobilenet_v2"
 BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
+FREEZE_BACKBONE = True
 
 CLASSES = (
     "person",

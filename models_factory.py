@@ -64,6 +64,7 @@ def _replace_head(
         raise ValueError(f"Head at '{head_path}' does not expose in_features.")
     new_head = torch.nn.Sequential(
         torch.nn.Linear(head.in_features, num_classes),
+        torch.nn.BatchNorm1d(num_classes),
         torch.nn.Sigmoid(),
     )
     _set_module_by_path(model, head_path, new_head)
