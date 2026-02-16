@@ -1,4 +1,20 @@
+import os
+
 import torch
+
+
+def tokenize_float(value: float, precision: int = 4) -> str:
+    return f"{value:.{precision}f}".replace(".", "p")
+
+
+def print_section(title: str, items: dict[str, object], width: int = 84) -> None:
+    line = "=" * width
+    print(line)
+    print(title)
+    print("-" * width)
+    for key, value in items.items():
+        print(f"{key:32}: {value}")
+    print(line)
 
 
 def train_loop(
@@ -8,10 +24,15 @@ def train_loop(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     mbatch_loss_group: int = -1,
+    progress_label: str | None = None,
 ):
     net.train()
     running_loss = 0.0
     mbatch_losses = []
+    progress_bar = None
+    total_batches = len(train_loader)
+    if total_batches > 0:
+        progress_bar = ProgressBar(total=total_batches, start_at=0, label=progress_label)
     for i, data in enumerate(train_loader):
         inputs, labels = data[0].to(device), data[1].to(device)
         optimizer.zero_grad()
@@ -24,8 +45,50 @@ def train_loop(
         if i % mbatch_loss_group == mbatch_loss_group - 1:
             mbatch_losses.append(running_loss / mbatch_loss_group)
             running_loss = 0.0
+        if progress_bar:
+            progress_bar.increment()
+    if progress_bar:
+        progress_bar.finish()
     if mbatch_loss_group > 0:
         return mbatch_losses
+
+
+def _compute_weighted_multilabel_metrics(
+    predictions: torch.Tensor,
+    labels: torch.Tensor,
+    num_classes: int,
+) -> dict[str, torch.Tensor]:
+    tps = (predictions * labels).sum(dim=0)
+    fps = (predictions * (1.0 - labels)).sum(dim=0)
+    class_total = labels.sum(dim=0)
+
+    prec_denom = tps + fps
+    class_prec = torch.where(prec_denom > 0, tps / prec_denom, torch.zeros_like(tps))
+    class_recall = torch.where(class_total > 0, tps / class_total, torch.zeros_like(tps))
+
+    freqs = class_total
+    inv_freq = torch.where(freqs > 0, 1.0 / freqs, torch.zeros_like(freqs))
+    inv_freq_sum = inv_freq.sum()
+    if inv_freq_sum > 0:
+        class_weights = inv_freq / inv_freq_sum
+    else:
+        class_weights = torch.full((num_classes,), 1.0 / num_classes, device=freqs.device)
+
+    precision = (class_prec * class_weights).sum()
+    recall = (class_recall * class_weights).sum()
+    if precision > 0 and recall > 0:
+        f1 = 2.0 * precision * recall / (precision + recall)
+    else:
+        f1 = torch.tensor(0.0, device=precision.device)
+
+    total_positives = freqs.sum()
+    accuracy = torch.where(total_positives > 0, tps.sum() / total_positives, torch.tensor(0.0, device=tps.device))
+    return {
+        "accuracy": accuracy,
+        "f1": f1,
+        "precision": precision,
+        "recall": recall,
+    }
 
 
 def validation_loop(
@@ -34,72 +97,238 @@ def validation_loop(
     criterion: torch.nn.Module,
     num_classes: int,
     device: torch.device,
-    multi_label: bool = False,
+    multi_label: bool = True,
     th_multi_label: float = 0.5,
     one_hot: bool = False,
     class_metrics: bool = False,
+    progress_label: str | None = None,
+    apply_sigmoid: bool = False,
 ):
     net.eval()
-    loss = 0
-    correct = 0
+    loss = 0.0
     size = len(val_loader.dataset)
-    class_total = {label: 0 for label in range(num_classes)}
-    class_tp = {label: 0 for label in range(num_classes)}
-    class_fp = {label: 0 for label in range(num_classes)}
+    class_total = torch.zeros(num_classes, dtype=torch.float32)
+    class_tp = torch.zeros(num_classes, dtype=torch.float32)
+    class_fp = torch.zeros(num_classes, dtype=torch.float32)
+    progress_bar = None
+    total_batches = len(val_loader)
+    if total_batches > 0:
+        progress_bar = ProgressBar(total=total_batches, start_at=0, label=progress_label)
+
     with torch.no_grad():
         for data in val_loader:
             images, labels = data[0].to(device), data[1].to(device)
             outputs = net(images)
             loss += criterion(outputs, labels).item() * images.size(0)
+            scores = torch.sigmoid(outputs) if apply_sigmoid else outputs
             if not multi_label:
-                predictions = torch.zeros_like(outputs)
-                predictions[torch.arange(outputs.shape[0]), torch.argmax(outputs, dim=1)] = 1.0
+                predictions = torch.zeros_like(scores)
+                predictions[torch.arange(scores.shape[0]), torch.argmax(scores, dim=1)] = 1.0
             else:
-                predictions = torch.where(outputs > th_multi_label, 1.0, 0.0)
+                predictions = torch.where(scores > th_multi_label, 1.0, 0.0)
             if not one_hot:
-                labels_mat = torch.zeros_like(outputs)
-                labels_mat[torch.arange(outputs.shape[0]), labels] = 1.0
+                labels_mat = torch.zeros_like(scores)
+                labels_mat[torch.arange(scores.shape[0]), labels] = 1.0
                 labels = labels_mat
 
             tps = predictions * labels
             fps = predictions - tps
 
-            tps = tps.sum(dim=0)
-            fps = fps.sum(dim=0)
-            lbls = labels.sum(dim=0)
+            class_tp += tps.sum(dim=0).cpu()
+            class_fp += fps.sum(dim=0).cpu()
+            class_total += labels.sum(dim=0).cpu()
+            if progress_bar:
+                progress_bar.increment()
+    if progress_bar:
+        progress_bar.finish()
 
-            for c in range(num_classes):
-                class_tp[c] += tps[c]
-                class_fp[c] += fps[c]
-                class_total[c] += lbls[c]
-
-            correct += tps.sum()
-
-    class_prec = []
-    class_recall = []
-    freqs = []
-    for c in range(num_classes):
-        class_prec.append(0 if class_tp[c] == 0 else class_tp[c] / (class_tp[c] + class_fp[c]))
-        class_recall.append(0 if class_tp[c] == 0 else class_tp[c] / class_total[c])
-        freqs.append(class_total[c])
-
-    freqs = torch.tensor(freqs)
-    class_weights = 1.0 / freqs
-    class_weights /= class_weights.sum()
-    class_prec = torch.tensor(class_prec)
-    class_recall = torch.tensor(class_recall)
+    metrics = _compute_weighted_multilabel_metrics(
+        predictions=torch.where(class_tp + class_fp > 0, class_tp / (class_tp + class_fp), torch.zeros_like(class_tp))
+        .unsqueeze(0)
+        .repeat(1, 1),
+        labels=torch.where(class_total > 0, class_tp / class_total, torch.zeros_like(class_total)).unsqueeze(0).repeat(1, 1),
+        num_classes=num_classes,
+    )
+    # Recompute metrics from aggregated counts without unstable class loops.
+    prec_denom = class_tp + class_fp
+    class_prec = torch.where(prec_denom > 0, class_tp / prec_denom, torch.zeros_like(class_tp))
+    class_recall = torch.where(class_total > 0, class_tp / class_total, torch.zeros_like(class_tp))
+    inv_freq = torch.where(class_total > 0, 1.0 / class_total, torch.zeros_like(class_total))
+    inv_freq_sum = inv_freq.sum()
+    if inv_freq_sum > 0:
+        class_weights = inv_freq / inv_freq_sum
+    else:
+        class_weights = torch.full((num_classes,), 1.0 / num_classes)
     prec = (class_prec * class_weights).sum()
     recall = (class_recall * class_weights).sum()
-    f1 = 2.0 / (1 / prec + 1 / recall)
-    val_loss = loss / size
-    accuracy = correct / freqs.sum()
+    f1 = 2.0 * prec * recall / (prec + recall) if (prec > 0 and recall > 0) else torch.tensor(0.0)
+    val_loss = loss / size if size > 0 else 0.0
+    total_pos = class_total.sum()
+    accuracy = class_tp.sum() / total_pos if total_pos > 0 else torch.tensor(0.0)
     results = {"loss": val_loss, "accuracy": accuracy, "f1": f1, "precision": prec, "recall": recall}
 
     if class_metrics:
         class_results = []
         for p, r in zip(class_prec, class_recall):
-            f1 = 0 if p == r == 0 else 2.0 / (1 / p + 1 / r)
+            f1 = 0 if (p <= 0 or r <= 0) else 2.0 * p * r / (p + r)
             class_results.append({"f1": f1, "precision": p, "recall": r})
         results = results, class_results
 
     return results
+
+
+def tune_threshold_on_validation(
+    val_loader: torch.utils.data.DataLoader,
+    net: torch.nn.Module,
+    criterion: torch.nn.Module,
+    num_classes: int,
+    device: torch.device,
+    one_hot: bool = True,
+    threshold_candidates: tuple[float, ...] | None = None,
+    progress_label: str | None = None,
+    apply_sigmoid: bool = True,
+) -> tuple[float, dict[str, torch.Tensor | float]]:
+    if threshold_candidates is None:
+        threshold_candidates = tuple(i / 100 for i in range(5, 96, 5))
+
+    net.eval()
+    total_loss = 0.0
+    size = len(val_loader.dataset)
+    scores_list: list[torch.Tensor] = []
+    labels_list: list[torch.Tensor] = []
+
+    progress_bar = None
+    total_batches = len(val_loader)
+    if total_batches > 0:
+        progress_bar = ProgressBar(total=total_batches, start_at=0, label=progress_label)
+
+    with torch.no_grad():
+        for data in val_loader:
+            images, labels = data[0].to(device), data[1].to(device)
+            logits = net(images)
+            total_loss += criterion(logits, labels).item() * images.size(0)
+            scores = torch.sigmoid(logits) if apply_sigmoid else logits
+            if not one_hot:
+                labels_mat = torch.zeros_like(scores)
+                labels_mat[torch.arange(scores.shape[0]), labels] = 1.0
+                labels = labels_mat
+            scores_list.append(scores.cpu())
+            labels_list.append(labels.cpu())
+            if progress_bar:
+                progress_bar.increment()
+
+    if progress_bar:
+        progress_bar.finish()
+
+    all_scores = torch.cat(scores_list, dim=0) if scores_list else torch.zeros((0, num_classes))
+    all_labels = torch.cat(labels_list, dim=0) if labels_list else torch.zeros((0, num_classes))
+    val_loss = total_loss / size if size > 0 else 0.0
+
+    best_threshold = threshold_candidates[0]
+    best_results: dict[str, torch.Tensor | float] | None = None
+    for threshold in threshold_candidates:
+        predictions = torch.where(all_scores > threshold, 1.0, 0.0)
+        metrics = _compute_weighted_multilabel_metrics(predictions, all_labels, num_classes)
+        result = {"loss": val_loss, **metrics}
+        if best_results is None or float(result["f1"]) > float(best_results["f1"]):
+            best_threshold = threshold
+            best_results = result
+
+    if best_results is None:
+        best_results = {"loss": val_loss, "accuracy": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+    return float(best_threshold), best_results
+
+
+class ProgressBarElements:
+    PROGRESS_RATIO = "{progress_ratio}"
+    PROGRESS_BAR = "{progress_bar}"
+    PROGRESS_PERCENTAGE = "{progress_percentage}"
+    LABEL = "{label}"
+
+
+class ProgressBar:
+    _DEFAULT_LAYOUT = (
+        ProgressBarElements.PROGRESS_RATIO,
+        " |",
+        ProgressBarElements.PROGRESS_BAR,
+        "| ",
+        ProgressBarElements.PROGRESS_PERCENTAGE,
+    )
+
+    def __init__(
+        self,
+        total: int,
+        start_at: int = 1,
+        decimals: int = 1,
+        length: int = 50,
+        void: str = " ",
+        fill: str = "█",
+        print_end: str = "\r",
+        layout: list[str] = None,
+        label: str | None = None,
+    ) -> None:
+        self.iteration = start_at
+        self.total = total
+        self.decimals = decimals
+        self.length = length
+        self.void = void
+        self.fill = fill
+        self.print_end = print_end
+        self._finished = False
+        self.progress_bar_length = 0
+        self.label = label or ""
+
+        if layout is not None:
+            self.layout = layout
+        elif self.label:
+            self.layout = [ProgressBarElements.LABEL, " ", *self._DEFAULT_LAYOUT]
+        else:
+            self.layout = list(self._DEFAULT_LAYOUT)
+
+    def start(self):
+        self.update()
+
+    def update(self):
+        if self.iteration > self.total:
+            if not self._finished:
+                self.finish()
+            self._finished = True
+            return
+
+        try:
+            self.percent = f"{self.iteration / self.total * 100: .{self.decimals}f}"
+        except ZeroDivisionError:
+            raise ValueError("Cannot have total = 0")
+
+        filled_length = int(self.length * self.iteration // self.total)
+
+        bar = self.fill * filled_length + self.void * (self.length - filled_length)
+
+        full_bar = "".join(self.layout).format_map(
+            {
+                "progress_ratio": f"{self.iteration}/{self.total}",
+                "progress_bar": bar,
+                "progress_percentage": f"{self.percent}%",
+                "label": self.label,
+            }
+        )
+
+        progress_bar = f"{full_bar: <{os.get_terminal_size().columns}}"
+
+        # This is necessary because all numbers are not the same length every time
+        # But I use os.get_terminal_size().columns instead which deletes the whole line
+        # So
+        # self.progress_bar_length = len(progress_bar)
+
+        print(f"\r{progress_bar}", end=self.print_end)
+
+    def increment(self):
+        self.iteration += 1
+        self.update()
+
+    def clear_line(self):
+        # print("\r" + " " * self.progress_bar_length, end="\r")
+        print("\r" + " " * os.get_terminal_size().columns, end="\r")
+
+    def finish(self):
+        print()

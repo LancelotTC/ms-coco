@@ -1,7 +1,11 @@
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DATASET_FOLDER = Path.home() / "ms-coco-dataset"
+LOCAL_FOLDER = Path.home() / "ms-coco"
+
+DATASET_FOLDER = LOCAL_FOLDER / "ms-coco-dataset"
+PRETRAINED_MODELS_FOLDER = LOCAL_FOLDER / "pre-trained_models"
+TRAINED_MODELS_FOLDER = PROJECT_ROOT / "trained_models"
 
 IMAGES_DIR = DATASET_FOLDER / "images"
 LABELS_DIR = DATASET_FOLDER / "labels"
@@ -10,8 +14,19 @@ TRAIN_IMAGES_DIR = IMAGES_DIR / "train-resized"
 TEST_IMAGES_DIR = IMAGES_DIR / "test-resized"
 TRAIN_LABELS_DIR = LABELS_DIR / "train"
 
+
 NUM_CLASSES = 80
-MODEL_NAME = "resnet18"
+MODEL_NAME = "efficientnet_b0"
+MODEL_NAME = "regnet_y_800mf"
+MODEL_NAME = "mobilenet_v3_large"
+MODEL_NAME = "swin_v2_t"
+MODEL_NAME = "efficientnet_v2_s"
+MODEL_NAME = "convnext_tiny"
+
+BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
+FREEZE_BACKBONE = True
+TRAIN_METRICS_EVERY_N_EPOCHS = 0
+VAL_EVERY_N_EPOCHS = 1
 
 CLASSES = (
     "person",

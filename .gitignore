@@ -3,3 +3,8 @@
 
 tempCodeRunnerFile.*
 *.ipynb
+
+__pycache__/
+predictions.json
+
+trained_models/
