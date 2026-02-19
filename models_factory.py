@@ -29,6 +29,7 @@ MODEL_SPECS = {
     "efficientnet_b0": ModelSpec(models.efficientnet_b0, models.EfficientNet_B0_Weights.DEFAULT, "classifier.1"),
     "efficientnet_v2_s": ModelSpec(models.efficientnet_v2_s, models.EfficientNet_V2_S_Weights.DEFAULT, "classifier.1"),
     "convnext_tiny": ModelSpec(models.convnext_tiny, models.ConvNeXt_Tiny_Weights.DEFAULT, "classifier.2"),
+    "convnext_small": ModelSpec(models.convnext_small, models.ConvNeXt_Small_Weights.DEFAULT, "classifier.2"),
     "regnet_y_800mf": ModelSpec(models.regnet_y_800mf, models.RegNet_Y_800MF_Weights.DEFAULT, "fc"),
     "swin_t": ModelSpec(models.swin_t, models.Swin_T_Weights.DEFAULT, "head"),
     "swin_v2_t": ModelSpec(models.swin_v2_t, models.Swin_V2_T_Weights.DEFAULT, "head"),

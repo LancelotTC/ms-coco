@@ -8,3 +8,6 @@ __pycache__/
 predictions.json
 
 trained_models/
+
+*.ipynb
+*.json

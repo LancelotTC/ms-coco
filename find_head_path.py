@@ -1,7 +1,7 @@
 import torch
 from torchvision import models
 
-m = models.swin_t(weights=None)  # change model here
+m = models.convnext_tiny(weights=None)  # change model here
 last = None
 for name, module in m.named_modules():
     if isinstance(module, torch.nn.Linear):

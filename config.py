@@ -16,12 +16,15 @@ TRAIN_LABELS_DIR = LABELS_DIR / "train"
 
 
 NUM_CLASSES = 80
+
+# All tested models retained for ease of use. Only last is considered.
 MODEL_NAME = "efficientnet_b0"
 MODEL_NAME = "regnet_y_800mf"
 MODEL_NAME = "mobilenet_v3_large"
 MODEL_NAME = "swin_v2_t"
 MODEL_NAME = "efficientnet_v2_s"
 MODEL_NAME = "convnext_tiny"
+MODEL_NAME = "convnext_small"
 
 BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
 FREEZE_BACKBONE = True

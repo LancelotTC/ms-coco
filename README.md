@@ -70,7 +70,7 @@ Edit `config.py` to set:
 - `MODEL_NAME` (default: `resnet18`)
 - directory constants if you do not use the default `~/ms-coco` layout
 - `BEST_MODEL_PATH` (checkpoint output path)
-- `FREEZE_BACKBONE` (`True` = train head only, `False` = train all layers)
+- `FREEZE_BACKBONE` (used as the initial freeze state in `training.py`)
 - `TRAIN_METRICS_EVERY_N_EPOCHS` (`0` disables extra train-set eval; higher values run it less often)
 - `VAL_EVERY_N_EPOCHS` (run validation every N epochs; final epoch always validates)
 - `EARLY_STOPPING_ENABLED`, `EARLY_STOPPING_PATIENCE`, `EARLY_STOPPING_MIN_DELTA` (stop when validation F1 plateaus)
@@ -80,7 +80,8 @@ Edit `training.py` / `testing.py` for runtime hyperparameters:
 
 - batch sizes
 - number of epochs
-- learning rate and milestone decay settings (`LEARNING_RATE`, `LR_MILESTONES`, `LR_DECAY_FACTOR`)
+- freeze milestone settings (`FREEZE_BACKBONE_AT_START`, `UNFREEZE_BACKBONE_EPOCH`)
+- learning-rate settings (`USE_DIFFERENTIAL_LR`, `LEARNING_RATE` or `BACKBONE_BASE_LR`/`HEAD_BASE_LR`, `LR_MILESTONES`, `LR_DECAY_FACTOR`)
 - threshold for multi-label prediction (`TH_MULTI_LABEL`)
 
 ## Training
@@ -92,11 +93,15 @@ python training.py
 Behavior:
 
 - Loads pretrained backbone weights from torchvision.
-- Uses `FREEZE_BACKBONE` from `config.py` to choose mode (`True`: trains only the replaced classifier head `Linear -> BatchNorm1d`, `False`: trains full model parameters).
+- Supports freeze-then-unfreeze with a single milestone:
+- starts with backbone frozen when `FREEZE_BACKBONE_AT_START=True`
+- unfreezes backbone at epoch `UNFREEZE_BACKBONE_EPOCH` (if within total epochs)
+- Learning-rate schedule is independent from freeze/unfreeze and applied through one scheduler over the whole run.
+- Supports either one LR for all params (`LEARNING_RATE`) or differential LR (`BACKBONE_BASE_LR`/`HEAD_BASE_LR`).
 - Uses `BCEWithLogitsLoss` for optimization.
 - Computes class-balanced `pos_weight` from the train split and passes it to `BCEWithLogitsLoss`.
 - Tunes the multi-label threshold on validation (best weighted F1) and saves it in checkpoint metadata as `best_threshold`.
-- Uses `MultiStepLR` with tuple milestones: starts at `LEARNING_RATE`, then decays by `LR_DECAY_FACTOR` at each epoch in `LR_MILESTONES`.
+- Uses `MultiStepLR` milestones (`LR_MILESTONES`) with decay factor `LR_DECAY_FACTOR`.
 - Splits training data into train/validation (`VAL_SPLIT`).
 - Supports speed/quality tradeoff with periodic metrics:
 - train-set evaluation cadence via `TRAIN_METRICS_EVERY_N_EPOCHS`

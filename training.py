@@ -12,8 +12,6 @@ from config import (
     NUM_CLASSES,
     TRAIN_IMAGES_DIR,
     TRAIN_LABELS_DIR,
-    TRAIN_METRICS_EVERY_N_EPOCHS,
-    VAL_EVERY_N_EPOCHS,
 )
 from dataset_readers import COCOTrainImageDataset
 from models_factory import AVAILABLE_MODELS, create_model, freeze_all
@@ -28,34 +26,146 @@ try:
 except ModuleNotFoundError:
     TENSORBOARD_AVAILABLE = False
 
+# Memory-aware batch schedule.
+TRAIN_BATCH_SIZE_FROZEN = 128
+TRAIN_BATCH_SIZE_UNFROZEN = 32
+VAL_BATCH_SIZE = 128
 
-BATCH_SIZE = 256
-NUM_EPOCHS = 20
+# Keep effective batch size high even when unfrozen batch must be small.
+GRAD_ACCUM_STEPS_FROZEN = 1
+GRAD_ACCUM_STEPS_UNFROZEN = 1
+
+USE_AMP = True
+AMP_DTYPE = torch.float16
+
+NUM_EPOCHS = 18
 # Intentionally run train metrics only once, at the final epoch.
 TRAIN_METRICS_EVERY_N_EPOCHS = NUM_EPOCHS
-LEARNING_RATE = 1e-2
-# LR_MILESTONES = (max(1, NUM_EPOCHS // 2), 2 * max(1, NUM_EPOCHS // 4))
-LR_MILESTONES = (2, 3, 4, 5, 6, 10)
-LR_DECAY_FACTOR = 0.1
+VAL_EVERY_N_EPOCHS = 1
+
+# Freeze/unfreeze schedule (independent from LR schedule).
+FREEZE_BACKBONE_AT_START = FREEZE_BACKBONE
+UNFREEZE_BACKBONE_EPOCH = 10  # 1-based epoch index; ignored when not freezing at start.
+
+# LR schedule (independent from freeze/unfreeze schedule).
+USE_DIFFERENTIAL_LR = True
+LEARNING_RATE = 1e-4
+BACKBONE_BASE_LR = 1e-5
+HEAD_BASE_LR = 1e-4
+# EPOCH_FRACTION = max(1, NUM_EPOCHS // 3)
+LR_MILESTONES = (6, 8)
+LR_DECAY_FACTOR = 5e-2
+
 VAL_SPLIT = 0.05
 SEED = 42
 NUM_WORKERS = 4
 
 TH_MULTI_LABEL = 0.5
-THRESHOLD_CANDIDATES = tuple(i / 100 for i in range(5, 96, 5))
+THRESHOLD_CANDIDATES = tuple(i / 100 for i in range(4, 97, 4))
 MBATCH_LOSS_GROUP = -1
+
 EARLY_STOPPING_ENABLED = True
 EARLY_STOPPING_PATIENCE = 4
 EARLY_STOPPING_MIN_DELTA = 0.0
 
 USE_TENSORBOARD = False
-MODEL_PATH = BEST_MODEL_PATH
+TRAINED_MODELS_ROOT = BEST_MODEL_PATH.parent
+ACTIVE_CHECKPOINT_FILENAME = BEST_MODEL_PATH.name
+MODEL_PATH = TRAINED_MODELS_ROOT / ACTIVE_CHECKPOINT_FILENAME
 
 
 def should_run_eval(epoch: int, every_n_epochs: int, force_last: bool, total_epochs: int) -> bool:
     if every_n_epochs > 0 and (epoch + 1) % every_n_epochs == 0:
         return True
     return force_last and epoch == total_epochs - 1
+
+
+def _build_training_plan_token() -> str:
+    milestones_token = "-".join(str(milestone) for milestone in LR_MILESTONES) if LR_MILESTONES else "none"
+    unfreeze_token = (
+        str(UNFREEZE_BACKBONE_EPOCH)
+        if FREEZE_BACKBONE_AT_START and 1 <= UNFREEZE_BACKBONE_EPOCH <= NUM_EPOCHS
+        else "none"
+    )
+    if USE_DIFFERENTIAL_LR:
+        lr_token = (
+            f"blr{tokenize_float(BACKBONE_BASE_LR, precision=6)}" f"-hlr{tokenize_float(HEAD_BASE_LR, precision=6)}"
+        )
+    else:
+        lr_token = f"lr{tokenize_float(LEARNING_RATE, precision=6)}"
+    return (
+        f"uf{unfreeze_token}-frz{int(FREEZE_BACKBONE_AT_START)}-{lr_token}"
+        f"-bs{TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}"
+        f"-ga{GRAD_ACCUM_STEPS_FROZEN}to{GRAD_ACCUM_STEPS_UNFROZEN}"
+        f"-amp{int(USE_AMP)}-ms{milestones_token}"
+    )
+
+
+def _build_batch_size_token() -> str:
+    has_unfreeze = FREEZE_BACKBONE_AT_START and 1 <= UNFREEZE_BACKBONE_EPOCH <= NUM_EPOCHS
+    if has_unfreeze:
+        return f"{TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}"
+    if FREEZE_BACKBONE_AT_START:
+        return str(TRAIN_BATCH_SIZE_FROZEN)
+    return str(TRAIN_BATCH_SIZE_UNFROZEN)
+
+
+def _configure_trainable_state(
+    net: torch.nn.Module,
+    head_params: list[torch.nn.Parameter],
+    freeze_backbone_now: bool,
+) -> str:
+    if freeze_backbone_now:
+        freeze_all(net)
+        for param in head_params:
+            param.requires_grad = True
+        return "frozen backbone (head-only fine-tuning)"
+
+    for param in net.parameters():
+        param.requires_grad = True
+    return "unfrozen backbone (full-model fine-tuning)"
+
+
+def _build_optimizer(
+    net: torch.nn.Module,
+    head_params: list[torch.nn.Parameter],
+) -> torch.optim.Optimizer:
+    if USE_DIFFERENTIAL_LR:
+        head_param_ids = {id(param) for param in head_params}
+        all_params = list(net.parameters())
+        backbone_params = [param for param in all_params if id(param) not in head_param_ids]
+        param_groups = []
+        if backbone_params:
+            param_groups.append({"params": backbone_params, "lr": BACKBONE_BASE_LR})
+        param_groups.append({"params": head_params, "lr": HEAD_BASE_LR})
+        return torch.optim.Adam(param_groups)
+    return torch.optim.Adam(net.parameters(), lr=LEARNING_RATE)
+
+
+def _build_scheduler(optimizer: torch.optim.Optimizer) -> torch.optim.lr_scheduler.MultiStepLR | None:
+    if not LR_MILESTONES:
+        return None
+    return torch.optim.lr_scheduler.MultiStepLR(
+        optimizer,
+        milestones=(*LR_MILESTONES,),
+        gamma=LR_DECAY_FACTOR,
+    )
+
+
+def _build_loader(
+    dataset: torch.utils.data.Dataset,
+    *,
+    batch_size: int,
+    shuffle: bool,
+) -> DataLoader:
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=NUM_WORKERS,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=NUM_WORKERS > 0,
+    )
 
 
 def _iter_subset_label_paths(train_subset) -> Iterable[Path]:
@@ -86,13 +196,10 @@ def _build_config_model_path(
     base_path: Path,
     model_name: str,
     total_epochs: int,
-    batch_size: int,
-    learning_rate: float,
+    batch_size_token: str,
+    training_plan_token: str,
     th_multi_label: float,
-    freeze_backbone: bool,
     val_split: float,
-    lr_milestones: tuple[int, ...],
-    lr_decay_factor: float,
     train_metrics_every_n_epochs: int,
     val_every_n_epochs: int,
     seed: int,
@@ -101,16 +208,13 @@ def _build_config_model_path(
 ) -> Path:
     suffix = base_path.suffix or ".pt"
     stem = base_path.stem
-    milestones_token = "-".join(str(milestone) for milestone in lr_milestones) if lr_milestones else "none"
     file_name = (
         f"{stem}_{model_name}"
         f"_ep-{total_epochs}"
-        f"_bs-{batch_size}"
-        f"_lr-{tokenize_float(learning_rate, precision=6)}"
+        f"_bs-{batch_size_token}"
+        f"_tp-{training_plan_token}"
         f"_th-{tokenize_float(th_multi_label, precision=3)}"
-        f"_frz-{int(freeze_backbone)}"
         f"_vs-{tokenize_float(val_split, precision=3)}"
-        f"_ms-{milestones_token}x{tokenize_float(lr_decay_factor, precision=3)}"
         f"_te-{train_metrics_every_n_epochs}"
         f"_ve-{val_every_n_epochs}"
         f"_sd-{seed}"
@@ -123,19 +227,19 @@ def _build_config_model_path(
 
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    training_plan_token = _build_training_plan_token()
+    batch_size_token = _build_batch_size_token()
+
     model_output_dir = MODEL_PATH.parent / MODEL_NAME
     model_output_dir.mkdir(parents=True, exist_ok=True)
     config_model_path = _build_config_model_path(
         model_output_dir / MODEL_PATH.name,
         MODEL_NAME,
         NUM_EPOCHS,
-        BATCH_SIZE,
-        LEARNING_RATE,
+        batch_size_token,
+        training_plan_token,
         TH_MULTI_LABEL,
-        FREEZE_BACKBONE,
         VAL_SPLIT,
-        LR_MILESTONES,
-        LR_DECAY_FACTOR,
         TRAIN_METRICS_EVERY_N_EPOCHS,
         VAL_EVERY_N_EPOCHS,
         SEED,
@@ -157,13 +261,26 @@ def main() -> None:
         "model_name": MODEL_NAME,
         "device": device.type,
         "epochs": NUM_EPOCHS,
-        "batch_size": BATCH_SIZE,
-        "learning_rate": LEARNING_RATE,
+        "train_batch_size_frozen": TRAIN_BATCH_SIZE_FROZEN,
+        "train_batch_size_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN,
+        "val_batch_size": VAL_BATCH_SIZE,
+        "grad_accum_steps_frozen": GRAD_ACCUM_STEPS_FROZEN,
+        "grad_accum_steps_unfrozen": GRAD_ACCUM_STEPS_UNFROZEN,
+        "effective_batch_frozen": TRAIN_BATCH_SIZE_FROZEN * GRAD_ACCUM_STEPS_FROZEN,
+        "effective_batch_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN * GRAD_ACCUM_STEPS_UNFROZEN,
+        "use_amp": USE_AMP,
+        "batch_size_token": batch_size_token,
+        "freeze_backbone_at_start": FREEZE_BACKBONE_AT_START,
+        "unfreeze_backbone_epoch": (UNFREEZE_BACKBONE_EPOCH if FREEZE_BACKBONE_AT_START else "n/a"),
+        "use_differential_lr": USE_DIFFERENTIAL_LR,
+        "learning_rate": LEARNING_RATE if not USE_DIFFERENTIAL_LR else "n/a",
+        "backbone_base_lr": BACKBONE_BASE_LR if USE_DIFFERENTIAL_LR else "n/a",
+        "head_base_lr": HEAD_BASE_LR if USE_DIFFERENTIAL_LR else "n/a",
         "lr_milestones": LR_MILESTONES,
         "lr_decay_factor": LR_DECAY_FACTOR,
+        "training_plan_token": training_plan_token,
         "th_multi_label": TH_MULTI_LABEL,
         "threshold_candidates": THRESHOLD_CANDIDATES,
-        "freeze_backbone": FREEZE_BACKBONE,
         "val_split": VAL_SPLIT,
         "num_workers": NUM_WORKERS,
         "train_metrics_every_n_epochs": TRAIN_METRICS_EVERY_N_EPOCHS,
@@ -171,6 +288,8 @@ def main() -> None:
         "early_stopping_enabled": EARLY_STOPPING_ENABLED,
         "early_stopping_patience": EARLY_STOPPING_PATIENCE,
         "early_stopping_min_delta": EARLY_STOPPING_MIN_DELTA,
+        "trained_models_root": TRAINED_MODELS_ROOT,
+        "active_checkpoint_filename": ACTIVE_CHECKPOINT_FILENAME,
         "active_checkpoint_path": MODEL_PATH,
         "config_checkpoint_path": config_model_path,
         "existing_config_best_f1": f"{existing_best_f1:.4f}" if existing_best_f1 >= 0 else "none",
@@ -191,40 +310,26 @@ def main() -> None:
         generator=torch.Generator().manual_seed(SEED),
     )
 
-    train_loader = DataLoader(
-        train_set,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=NUM_WORKERS,
-    )
-    val_loader = DataLoader(
-        val_set,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=NUM_WORKERS,
-    )
+    train_batch_size_now = TRAIN_BATCH_SIZE_FROZEN if FREEZE_BACKBONE_AT_START else TRAIN_BATCH_SIZE_UNFROZEN
+    grad_accum_steps_now = GRAD_ACCUM_STEPS_FROZEN if FREEZE_BACKBONE_AT_START else GRAD_ACCUM_STEPS_UNFROZEN
+    train_loader = _build_loader(train_set, batch_size=train_batch_size_now, shuffle=True)
+    val_loader = _build_loader(val_set, batch_size=VAL_BATCH_SIZE, shuffle=False)
 
-    if FREEZE_BACKBONE:
-        freeze_all(net)
-        for param in head_params:
-            param.requires_grad = True
-        trainable_params = list(head_params)
-        print("Training mode: frozen backbone (head-only fine-tuning)")
-    else:
-        for param in net.parameters():
-            param.requires_grad = True
-        trainable_params = [param for param in net.parameters() if param.requires_grad]
-        print("Training mode: unfrozen backbone (full-model fine-tuning)")
     net = net.to(device)
+    head_params_list = list(head_params)
+    current_mode_text = _configure_trainable_state(net, head_params_list, FREEZE_BACKBONE_AT_START)
+    print(f"Training mode at start: {current_mode_text}")
+
+    should_unfreeze_later = FREEZE_BACKBONE_AT_START and 1 <= UNFREEZE_BACKBONE_EPOCH <= NUM_EPOCHS
+    if should_unfreeze_later:
+        print(f"Backbone unfreeze scheduled at epoch {UNFREEZE_BACKBONE_EPOCH}.")
+
+    optimizer = _build_optimizer(net, head_params_list)
+    scheduler = _build_scheduler(optimizer)
+    scaler = torch.amp.GradScaler("cuda") if USE_AMP and device.type == "cuda" else None
 
     pos_weight = _compute_pos_weight(train_set, NUM_CLASSES).to(device)
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    optimizer = torch.optim.Adam(trainable_params, lr=LEARNING_RATE)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer,
-        milestones=(*LR_MILESTONES,),
-        gamma=LR_DECAY_FACTOR,
-    )
 
     run_best_f1 = -1.0
     run_best_epoch = -1
@@ -240,11 +345,26 @@ def main() -> None:
     if USE_TENSORBOARD and TENSORBOARD_AVAILABLE:
         summary_writer = SummaryWriter()
 
+    backbone_is_unfrozen = not FREEZE_BACKBONE_AT_START
     for epoch in range(NUM_EPOCHS):
         epoch_index = epoch + 1
         epoch_start = time.perf_counter()
         print(f"\nEpoch {epoch_index}:")
-        current_lr = optimizer.param_groups[0]["lr"]
+
+        if should_unfreeze_later and not backbone_is_unfrozen and epoch_index >= UNFREEZE_BACKBONE_EPOCH:
+            current_mode_text = _configure_trainable_state(net, head_params_list, False)
+            backbone_is_unfrozen = True
+            train_batch_size_now = TRAIN_BATCH_SIZE_UNFROZEN
+            grad_accum_steps_now = GRAD_ACCUM_STEPS_UNFROZEN
+            train_loader = _build_loader(train_set, batch_size=train_batch_size_now, shuffle=True)
+            print(
+                f"Backbone unfrozen at epoch {epoch_index}. Mode: {current_mode_text} | "
+                f"train_batch_size={train_batch_size_now}, grad_accum_steps={grad_accum_steps_now}"
+            )
+
+        lr_values = [f"{group['lr']:.6g}" for group in optimizer.param_groups]
+        current_lr_text = lr_values[0] if len(lr_values) == 1 else f"[{', '.join(lr_values)}]"
+
         run_train_metrics = should_run_eval(
             epoch,
             TRAIN_METRICS_EVERY_N_EPOCHS,
@@ -266,6 +386,10 @@ def main() -> None:
             device,
             mbatch_loss_group=MBATCH_LOSS_GROUP,
             progress_label="    Training",
+            grad_accum_steps=grad_accum_steps_now,
+            use_amp=USE_AMP,
+            amp_dtype=AMP_DTYPE,
+            scaler=scaler,
         )
 
         train_results = None
@@ -316,7 +440,7 @@ def main() -> None:
             current_metric = float(val_results["f1"])
             if current_metric > run_best_f1 + EARLY_STOPPING_MIN_DELTA:
                 run_best_f1 = current_metric
-                run_best_epoch = epoch + 1
+                run_best_epoch = epoch_index
                 run_best_threshold = tuned_threshold
                 no_improve_eval_count = 0
                 run_best_checkpoint = {
@@ -326,13 +450,28 @@ def main() -> None:
                     "best_epoch": run_best_epoch,
                     "total_epochs": NUM_EPOCHS,
                     "best_threshold": run_best_threshold,
-                    "batch_size": BATCH_SIZE,
-                    "learning_rate": LEARNING_RATE,
-                    "th_multi_label": TH_MULTI_LABEL,
-                    "freeze_backbone": FREEZE_BACKBONE,
-                    "val_split": VAL_SPLIT,
+                    "batch_size": train_batch_size_now,
+                    "train_batch_size_frozen": TRAIN_BATCH_SIZE_FROZEN,
+                    "train_batch_size_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN,
+                    "val_batch_size": VAL_BATCH_SIZE,
+                    "grad_accum_steps_frozen": GRAD_ACCUM_STEPS_FROZEN,
+                    "grad_accum_steps_unfrozen": GRAD_ACCUM_STEPS_UNFROZEN,
+                    "effective_batch_frozen": TRAIN_BATCH_SIZE_FROZEN * GRAD_ACCUM_STEPS_FROZEN,
+                    "effective_batch_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN * GRAD_ACCUM_STEPS_UNFROZEN,
+                    "use_amp": USE_AMP,
+                    "learning_rate": float(optimizer.param_groups[0]["lr"]),
+                    "learning_rates": [float(group["lr"]) for group in optimizer.param_groups],
+                    "use_differential_lr": USE_DIFFERENTIAL_LR,
+                    "base_learning_rate": LEARNING_RATE if not USE_DIFFERENTIAL_LR else None,
+                    "backbone_base_lr": BACKBONE_BASE_LR if USE_DIFFERENTIAL_LR else None,
+                    "head_base_lr": HEAD_BASE_LR if USE_DIFFERENTIAL_LR else None,
                     "lr_milestones": LR_MILESTONES,
                     "lr_decay_factor": LR_DECAY_FACTOR,
+                    "freeze_backbone_at_start": FREEZE_BACKBONE_AT_START,
+                    "unfreeze_backbone_epoch": UNFREEZE_BACKBONE_EPOCH if should_unfreeze_later else None,
+                    "training_plan_token": training_plan_token,
+                    "th_multi_label": TH_MULTI_LABEL,
+                    "val_split": VAL_SPLIT,
                     "train_metrics_every_n_epochs": TRAIN_METRICS_EVERY_N_EPOCHS,
                     "val_every_n_epochs": VAL_EVERY_N_EPOCHS,
                     "seed": SEED,
@@ -354,12 +493,16 @@ def main() -> None:
         epoch_seconds = int(time.perf_counter() - epoch_start)
         print(
             f"Done: Epoch {epoch_index}/{NUM_EPOCHS} "
-            f"lr={current_lr:.6g} "
+            f"mode={'unfrozen' if backbone_is_unfrozen else 'frozen'} "
+            f"bs={train_batch_size_now} "
+            f"accum={grad_accum_steps_now} "
+            f"lr={current_lr_text} "
             f"train_f1={train_f1_text} "
             f"val_f1={val_f1_text} "
             f"time taken = {epoch_seconds} seconds"
         )
-        scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
         completed_epochs = epoch_index
 
         if EARLY_STOPPING_ENABLED and val_results is not None and no_improve_eval_count >= EARLY_STOPPING_PATIENCE:
@@ -425,8 +568,8 @@ def main() -> None:
             "active_checkpoint_path": MODEL_PATH,
             "config_checkpoint_path": config_model_path,
             "config_summary": (
-                f"epochs={NUM_EPOCHS}, batch_size={BATCH_SIZE}, lr={LEARNING_RATE}, "
-                f"th_multi_label={TH_MULTI_LABEL}, freeze_backbone={FREEZE_BACKBONE}"
+                f"epochs={NUM_EPOCHS}, train_bs={TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}, "
+                f"training_plan={training_plan_token}, th_multi_label={TH_MULTI_LABEL}"
             ),
         }
         print_section("TRAINING SUMMARY", summary_items)
@@ -438,11 +581,6 @@ if __name__ == "__main__":
     if MODEL_NAME not in AVAILABLE_MODELS:
         raise ValueError(f"MODEL_NAME must be one of: {', '.join(AVAILABLE_MODELS)}")
 
-    # from tools import timespan
-
     t = time.perf_counter()
-
     main()
-
-    # print(f"Time taken: {timespan(int(time.perf_counter() - t))}")
     print(f"Time taken: {time.perf_counter() - t: .2f}")

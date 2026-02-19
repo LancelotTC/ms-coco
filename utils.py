@@ -25,21 +25,43 @@ def train_loop(
     device: torch.device,
     mbatch_loss_group: int = -1,
     progress_label: str | None = None,
+    grad_accum_steps: int = 1,
+    use_amp: bool = False,
+    amp_dtype: torch.dtype = torch.float16,
+    scaler: torch.amp.GradScaler | None = None,
 ):
     net.train()
     running_loss = 0.0
     mbatch_losses = []
+    grad_accum_steps = max(1, int(grad_accum_steps))
+    use_amp_now = bool(use_amp and device.type == "cuda")
+    if use_amp_now and scaler is None:
+        scaler = torch.amp.GradScaler("cuda")
     progress_bar = None
     total_batches = len(train_loader)
     if total_batches > 0:
         progress_bar = ProgressBar(total=total_batches, start_at=0, label=progress_label)
+    optimizer.zero_grad(set_to_none=True)
     for i, data in enumerate(train_loader):
         inputs, labels = data[0].to(device), data[1].to(device)
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+        with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp_now):
+            outputs = net(inputs)
+            loss = criterion(outputs, labels)
+        loss_for_backward = loss / grad_accum_steps
+        if use_amp_now and scaler is not None:
+            scaler.scale(loss_for_backward).backward()
+        else:
+            loss_for_backward.backward()
+
+        should_step = ((i + 1) % grad_accum_steps == 0) or (i + 1 == total_batches)
+        if should_step:
+            if use_amp_now and scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
         running_loss += loss.item()
         # following condition False by default, unless mbatch_loss_group > 0
         if i % mbatch_loss_group == mbatch_loss_group - 1:
