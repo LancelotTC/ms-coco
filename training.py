@@ -14,7 +14,7 @@ from config import (
     TRAIN_LABELS_DIR,
 )
 from dataset_readers import COCOTrainImageDataset
-from models_factory import AVAILABLE_MODELS, create_model, freeze_all
+from models_factory import AVAILABLE_MODELS, create_model, freeze_all, unfreeze_last_n_backbone_layers
 from utils import print_section, tokenize_float, train_loop, tune_threshold_on_validation, validation_loop
 
 try:
@@ -46,6 +46,8 @@ VAL_EVERY_N_EPOCHS = 1
 # Freeze/unfreeze schedule (independent from LR schedule).
 FREEZE_BACKBONE_AT_START = FREEZE_BACKBONE
 UNFREEZE_BACKBONE_EPOCH = 1  # 1-based epoch index; ignored when not freezing at start.
+# None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
+UNFREEZE_LAST_N_BACKBONE_LAYERS = None
 
 # LR schedule (independent from freeze/unfreeze schedule).
 USE_DIFFERENTIAL_LR = True
@@ -93,8 +95,10 @@ def _build_training_plan_token() -> str:
         )
     else:
         lr_token = f"lr{tokenize_float(LEARNING_RATE, precision=6)}"
+    partial_unfreeze_token = "all" if UNFREEZE_LAST_N_BACKBONE_LAYERS is None else str(UNFREEZE_LAST_N_BACKBONE_LAYERS)
     return (
         f"uf{unfreeze_token}-frz{int(FREEZE_BACKBONE_AT_START)}-{lr_token}"
+        f"-ul{partial_unfreeze_token}"
         f"-bs{TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}"
         f"-ga{GRAD_ACCUM_STEPS_FROZEN}to{GRAD_ACCUM_STEPS_UNFROZEN}"
         f"-amp{int(USE_AMP)}-ms{milestones_token}"
@@ -114,16 +118,30 @@ def _configure_trainable_state(
     net: torch.nn.Module,
     head_params: list[torch.nn.Parameter],
     freeze_backbone_now: bool,
-) -> str:
-    if freeze_backbone_now:
-        freeze_all(net)
-        for param in head_params:
-            param.requires_grad = True
-        return "frozen backbone (head-only fine-tuning)"
-
-    for param in net.parameters():
+) -> tuple[str, list[str]]:
+    freeze_all(net)
+    for param in head_params:
         param.requires_grad = True
-    return "unfrozen backbone (full-model fine-tuning)"
+
+    if freeze_backbone_now:
+        return "frozen backbone (head-only fine-tuning)", []
+
+    if UNFREEZE_LAST_N_BACKBONE_LAYERS is None:
+        for param in net.parameters():
+            param.requires_grad = True
+        return "unfrozen backbone (full-model fine-tuning)", ["<all backbone layers>"]
+
+    unfrozen_layer_names = unfreeze_last_n_backbone_layers(
+        net,
+        UNFREEZE_LAST_N_BACKBONE_LAYERS,
+        head_params=head_params,
+    )
+    mode_text = (
+        f"partially unfrozen backbone (last {len(unfrozen_layer_names)} layers + head)"
+        if unfrozen_layer_names
+        else "frozen backbone (head-only fine-tuning)"
+    )
+    return mode_text, unfrozen_layer_names
 
 
 def _build_optimizer(
@@ -272,6 +290,9 @@ def main() -> None:
         "batch_size_token": batch_size_token,
         "freeze_backbone_at_start": FREEZE_BACKBONE_AT_START,
         "unfreeze_backbone_epoch": (UNFREEZE_BACKBONE_EPOCH if FREEZE_BACKBONE_AT_START else "n/a"),
+        "unfreeze_last_n_backbone_layers": (
+            UNFREEZE_LAST_N_BACKBONE_LAYERS if UNFREEZE_LAST_N_BACKBONE_LAYERS is not None else "all"
+        ),
         "use_differential_lr": USE_DIFFERENTIAL_LR,
         "learning_rate": LEARNING_RATE if not USE_DIFFERENTIAL_LR else "n/a",
         "backbone_base_lr": BACKBONE_BASE_LR if USE_DIFFERENTIAL_LR else "n/a",
@@ -317,12 +338,15 @@ def main() -> None:
 
     net = net.to(device)
     head_params_list = list(head_params)
-    current_mode_text = _configure_trainable_state(net, head_params_list, FREEZE_BACKBONE_AT_START)
+    current_mode_text, active_backbone_layers = _configure_trainable_state(net, head_params_list, FREEZE_BACKBONE_AT_START)
     print(f"Training mode at start: {current_mode_text}")
+    if active_backbone_layers and active_backbone_layers != ["<all backbone layers>"]:
+        print(f"Trainable backbone layers at start ({len(active_backbone_layers)}): {', '.join(active_backbone_layers)}")
 
     should_unfreeze_later = FREEZE_BACKBONE_AT_START and 1 <= UNFREEZE_BACKBONE_EPOCH <= NUM_EPOCHS
     if should_unfreeze_later:
-        print(f"Backbone unfreeze scheduled at epoch {UNFREEZE_BACKBONE_EPOCH}.")
+        target_layers = UNFREEZE_LAST_N_BACKBONE_LAYERS if UNFREEZE_LAST_N_BACKBONE_LAYERS is not None else "all"
+        print(f"Backbone unfreeze scheduled at epoch {UNFREEZE_BACKBONE_EPOCH} (layers={target_layers}).")
 
     optimizer = _build_optimizer(net, head_params_list)
     scheduler = _build_scheduler(optimizer)
@@ -352,7 +376,7 @@ def main() -> None:
         print(f"\nEpoch {epoch_index}:")
 
         if should_unfreeze_later and not backbone_is_unfrozen and epoch_index >= UNFREEZE_BACKBONE_EPOCH:
-            current_mode_text = _configure_trainable_state(net, head_params_list, False)
+            current_mode_text, active_backbone_layers = _configure_trainable_state(net, head_params_list, False)
             backbone_is_unfrozen = True
             train_batch_size_now = TRAIN_BATCH_SIZE_UNFROZEN
             grad_accum_steps_now = GRAD_ACCUM_STEPS_UNFROZEN
@@ -361,6 +385,11 @@ def main() -> None:
                 f"Backbone unfrozen at epoch {epoch_index}. Mode: {current_mode_text} | "
                 f"train_batch_size={train_batch_size_now}, grad_accum_steps={grad_accum_steps_now}"
             )
+            if active_backbone_layers and active_backbone_layers != ["<all backbone layers>"]:
+                print(
+                    "Unfrozen backbone layers "
+                    f"({len(active_backbone_layers)}): {', '.join(active_backbone_layers)}"
+                )
 
         lr_values = [f"{group['lr']:.6g}" for group in optimizer.param_groups]
         current_lr_text = lr_values[0] if len(lr_values) == 1 else f"[{', '.join(lr_values)}]"
@@ -469,6 +498,7 @@ def main() -> None:
                     "lr_decay_factor": LR_DECAY_FACTOR,
                     "freeze_backbone_at_start": FREEZE_BACKBONE_AT_START,
                     "unfreeze_backbone_epoch": UNFREEZE_BACKBONE_EPOCH if should_unfreeze_later else None,
+                    "unfreeze_last_n_backbone_layers": UNFREEZE_LAST_N_BACKBONE_LAYERS,
                     "training_plan_token": training_plan_token,
                     "th_multi_label": TH_MULTI_LABEL,
                     "val_split": VAL_SPLIT,
@@ -493,7 +523,7 @@ def main() -> None:
         epoch_seconds = int(time.perf_counter() - epoch_start)
         print(
             f"Done: Epoch {epoch_index}/{NUM_EPOCHS} "
-            f"mode={'unfrozen' if backbone_is_unfrozen else 'frozen'} "
+            f"mode={current_mode_text} "
             f"bs={train_batch_size_now} "
             f"accum={grad_accum_steps_now} "
             f"lr={current_lr_text} "
@@ -580,6 +610,8 @@ def main() -> None:
 if __name__ == "__main__":
     if MODEL_NAME not in AVAILABLE_MODELS:
         raise ValueError(f"MODEL_NAME must be one of: {', '.join(AVAILABLE_MODELS)}")
+    if UNFREEZE_LAST_N_BACKBONE_LAYERS is not None and UNFREEZE_LAST_N_BACKBONE_LAYERS < 1:
+        raise ValueError("UNFREEZE_LAST_N_BACKBONE_LAYERS must be None or an integer >= 1.")
 
     t = time.perf_counter()
     main()

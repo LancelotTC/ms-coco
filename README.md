@@ -61,6 +61,8 @@ source .venv/bin/activate
 pip install torch torchvision pillow
 # Optional (only if using TensorBoard)
 pip install tensorboard
+# Optional (only if generating confusion-matrix images)
+pip install matplotlib
 ```
 
 ## Configuration
@@ -81,6 +83,7 @@ Edit `training.py` / `testing.py` for runtime hyperparameters:
 - batch sizes
 - number of epochs
 - freeze milestone settings (`FREEZE_BACKBONE_AT_START`, `UNFREEZE_BACKBONE_EPOCH`)
+- selective fine-tuning depth (`UNFREEZE_LAST_N_BACKBONE_LAYERS`)
 - learning-rate settings (`USE_DIFFERENTIAL_LR`, `LEARNING_RATE` or `BACKBONE_BASE_LR`/`HEAD_BASE_LR`, `LR_MILESTONES`, `LR_DECAY_FACTOR`)
 - threshold for multi-label prediction (`TH_MULTI_LABEL`)
 
@@ -96,6 +99,7 @@ Behavior:
 - Supports freeze-then-unfreeze with a single milestone:
 - starts with backbone frozen when `FREEZE_BACKBONE_AT_START=True`
 - unfreezes backbone at epoch `UNFREEZE_BACKBONE_EPOCH` (if within total epochs)
+- when unfreezing, you can either unfreeze all backbone layers (`UNFREEZE_LAST_N_BACKBONE_LAYERS=None`) or only the last `n` backbone layers (`UNFREEZE_LAST_N_BACKBONE_LAYERS=<int>`).
 - Learning-rate schedule is independent from freeze/unfreeze and applied through one scheduler over the whole run.
 - Supports either one LR for all params (`LEARNING_RATE`) or differential LR (`BACKBONE_BASE_LR`/`HEAD_BASE_LR`).
 - Uses `BCEWithLogitsLoss` for optimization.
@@ -139,6 +143,25 @@ Behavior:
 - Prints a readable testing config summary before inference and a summary after inference.
 - Applies `sigmoid` to model logits, then thresholds with checkpoint `best_threshold` (fallback to configured threshold if missing).
 - Writes predictions to a detailed filename that includes model name and available checkpoint metadata (best F1, epoch, batch size, learning rate, threshold), plus testing batch size and threshold.
+
+## Confusion Matrix Image
+
+Configure constants in `generate_confusion_matrix.py`:
+
+- `MODEL_PATH`
+- `SPLIT` (`"val"`, `"train"`, `"all"`)
+- `VAL_SPLIT`, `SEED`
+- `BATCH_SIZE`, `NUM_WORKERS`
+- `TH_MULTI_LABEL` (`None` uses checkpoint threshold)
+- `NORMALIZE` (`"none"`, `"rows"`, `"all"`)
+- `TOP_K_CLASSES` (`0` renders all classes)
+- `OUTPUT_PATH`
+
+Then run:
+
+```bash
+python generate_confusion_matrix.py
+```
 
 ## Results Table (Pandas)
 

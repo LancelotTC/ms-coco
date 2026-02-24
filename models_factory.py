@@ -91,6 +91,29 @@ def freeze_all(model: torch.nn.Module) -> None:
         param.requires_grad = False
 
 
+def unfreeze_last_n_backbone_layers(
+    model: torch.nn.Module,
+    n_layers: int,
+    *,
+    head_params: Iterable[torch.nn.Parameter] = (),
+) -> list[str]:
+    if n_layers < 1:
+        return []
+
+    head_param_ids = {id(param) for param in head_params}
+    backbone_leaf_layers: list[tuple[str, list[torch.nn.Parameter]]] = []
+    for module_name, module in model.named_modules():
+        layer_params = [param for param in module.parameters(recurse=False) if id(param) not in head_param_ids]
+        if layer_params:
+            backbone_leaf_layers.append((module_name, layer_params))
+
+    selected_layers = backbone_leaf_layers[-n_layers:]
+    for _, layer_params in selected_layers:
+        for param in layer_params:
+            param.requires_grad = True
+    return [layer_name or "<root>" for layer_name, _ in selected_layers]
+
+
 def _replace_head(
     model: torch.nn.Module,
     head_path: str,

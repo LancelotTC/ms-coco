@@ -16,13 +16,12 @@ TH_MULTI_LABEL = 0.5
 
 MODEL_PATH = (
     TRAINED_MODELS_FOLDER
-    / "convnext_tiny"
-    / "best_model_convnext_tiny_ep-18_bs-256to16_tp-uf1-frz1-blr0p000010-hlr0p000100-bs256to16-ga1to4-amp1-ms9_th-0p500_vs-0p050_te-18_ve-1_sd-42_nw-4_nc-80.pt"
+    / "convnext_base"
+    / "best_model_convnext_base_ep-25_bs-256to8_tp-uf1-frz1-blr0p000010-hlr0p000100-bs256to8-ga1to4-amp1-ms9_th-0p500_vs-0p050_te-25_ve-1_sd-42_nw-4_nc-80"
 )
 
-
 MODEL_PATH = BEST_MODEL_PATH
-MODEL_PATH = r"C:\Users\Lanxe\OneDrive\Master MINDS M1\Machine Learning Computer Vision\ms-coco\trained_models\swin_t\best_model_swin_t_ep-18_bs-256to16_tp-uf1-frz1-blr0p000010-hlr0p000100-bs256to16-ga1to4-amp1-ms9_th-0p500_vs-0p050_te-18_ve-1_sd-42_nw-4_nc-80.pt"
+
 
 OUTPUT_PATH = Path("predictions.json")
 
