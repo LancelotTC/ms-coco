@@ -1,4 +1,3 @@
-from torchvision.models import ResNet50_Weights
 from config import CLASSES
 from models_factory import MODEL_SPECS
 from pprint import pprint

@@ -63,8 +63,7 @@ def train_loop(
             optimizer.zero_grad(set_to_none=True)
 
         running_loss += loss.item()
-        # following condition False by default, unless mbatch_loss_group > 0
-        if i % mbatch_loss_group == mbatch_loss_group - 1:
+        if mbatch_loss_group > 0 and (i + 1) % mbatch_loss_group == 0:
             mbatch_losses.append(running_loss / mbatch_loss_group)
             running_loss = 0.0
         if progress_bar:
@@ -164,14 +163,6 @@ def validation_loop(
     if progress_bar:
         progress_bar.finish()
 
-    metrics = _compute_weighted_multilabel_metrics(
-        predictions=torch.where(class_tp + class_fp > 0, class_tp / (class_tp + class_fp), torch.zeros_like(class_tp))
-        .unsqueeze(0)
-        .repeat(1, 1),
-        labels=torch.where(class_total > 0, class_tp / class_total, torch.zeros_like(class_total)).unsqueeze(0).repeat(1, 1),
-        num_classes=num_classes,
-    )
-    # Recompute metrics from aggregated counts without unstable class loops.
     prec_denom = class_tp + class_fp
     class_prec = torch.where(prec_denom > 0, class_tp / prec_denom, torch.zeros_like(class_tp))
     class_recall = torch.where(class_total > 0, class_tp / class_total, torch.zeros_like(class_tp))
@@ -284,7 +275,7 @@ class ProgressBar:
         decimals: int = 1,
         length: int = 50,
         void: str = " ",
-        fill: str = "█",
+        fill: str = "#",
         print_end: str = "\r",
         layout: list[str] = None,
         label: str | None = None,
@@ -297,7 +288,6 @@ class ProgressBar:
         self.fill = fill
         self.print_end = print_end
         self._finished = False
-        self.progress_bar_length = 0
         self.label = label or ""
 
         if layout is not None:
@@ -337,11 +327,6 @@ class ProgressBar:
 
         progress_bar = f"{full_bar: <{os.get_terminal_size().columns}}"
 
-        # This is necessary because all numbers are not the same length every time
-        # But I use os.get_terminal_size().columns instead which deletes the whole line
-        # So
-        # self.progress_bar_length = len(progress_bar)
-
         print(f"\r{progress_bar}", end=self.print_end)
 
     def increment(self):
@@ -349,7 +334,6 @@ class ProgressBar:
         self.update()
 
     def clear_line(self):
-        # print("\r" + " " * self.progress_bar_length, end="\r")
         print("\r" + " " * os.get_terminal_size().columns, end="\r")
 
     def finish(self):

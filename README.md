@@ -58,11 +58,7 @@ python -m venv .venv
 # Linux/macOS
 source .venv/bin/activate
 
-pip install torch torchvision pillow
-# Optional (only if using TensorBoard)
-pip install tensorboard
-# Optional (only if generating confusion-matrix images)
-pip install matplotlib
+pip install -r requirements.txt
 ```
 
 ## Configuration

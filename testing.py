@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR, TRAINED_MODELS_FOLDER
+from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
 from dataset_readers import COCOTestImageDataset
 from models_factory import AVAILABLE_MODELS, create_model
 from utils import ProgressBar, print_section, tokenize_float
@@ -13,12 +13,6 @@ from utils import ProgressBar, print_section, tokenize_float
 BATCH_SIZE = 32
 NUM_WORKERS = 0
 TH_MULTI_LABEL = 0.5
-
-MODEL_PATH = (
-    TRAINED_MODELS_FOLDER
-    / "convnext_base"
-    / "best_model_convnext_base_ep-25_bs-256to8_tp-uf1-frz1-blr0p000010-hlr0p000100-bs256to8-ga1to4-amp1-ms9_th-0p500_vs-0p050_te-25_ve-1_sd-42_nw-4_nc-80"
-)
 
 MODEL_PATH = BEST_MODEL_PATH
 

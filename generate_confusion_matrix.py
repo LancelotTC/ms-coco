@@ -1,8 +1,8 @@
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader, random_split
-import matplotlib.pyplot as plt
 
 from config import BEST_MODEL_PATH, CLASSES, MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
 from dataset_readers import COCOTrainImageDataset
@@ -30,13 +30,6 @@ OUTPUT_PATH = Path("trained_models") / "confusion_matrix.png"
 
 
 def _resolve_transform(model_name: str):
-    try:
-        _, transform, _ = create_model(model_name, NUM_CLASSES, pretrained=True)
-        if transform is not None:
-            return transform
-    except Exception:
-        pass
-
     spec = MODEL_SPECS.get(model_name)
     if spec is None:
         raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(AVAILABLE_MODELS)}")
