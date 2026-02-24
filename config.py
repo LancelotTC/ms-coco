@@ -23,8 +23,12 @@ MODEL_NAME = "regnet_y_800mf"
 MODEL_NAME = "mobilenet_v3_large"
 MODEL_NAME = "swin_v2_t"
 MODEL_NAME = "efficientnet_v2_s"
+MODEL_NAME = "swin_t"
 MODEL_NAME = "convnext_tiny"
 MODEL_NAME = "convnext_small"
+MODEL_NAME = "convnext_base"
+MODEL_NAME = "resnet50"
+MODEL_NAME = "convnext_large"
 
 BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
 FREEZE_BACKBONE = True

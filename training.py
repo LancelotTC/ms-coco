@@ -27,44 +27,44 @@ except ModuleNotFoundError:
     TENSORBOARD_AVAILABLE = False
 
 # Memory-aware batch schedule.
-TRAIN_BATCH_SIZE_FROZEN = 128
-TRAIN_BATCH_SIZE_UNFROZEN = 32
-VAL_BATCH_SIZE = 128
+TRAIN_BATCH_SIZE_FROZEN = 256
+TRAIN_BATCH_SIZE_UNFROZEN = 16
+VAL_BATCH_SIZE = 256
 
 # Keep effective batch size high even when unfrozen batch must be small.
 GRAD_ACCUM_STEPS_FROZEN = 1
-GRAD_ACCUM_STEPS_UNFROZEN = 1
+GRAD_ACCUM_STEPS_UNFROZEN = 4
 
 USE_AMP = True
 AMP_DTYPE = torch.float16
 
-NUM_EPOCHS = 18
+NUM_EPOCHS = 25
 # Intentionally run train metrics only once, at the final epoch.
 TRAIN_METRICS_EVERY_N_EPOCHS = NUM_EPOCHS
 VAL_EVERY_N_EPOCHS = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
 FREEZE_BACKBONE_AT_START = FREEZE_BACKBONE
-UNFREEZE_BACKBONE_EPOCH = 10  # 1-based epoch index; ignored when not freezing at start.
+UNFREEZE_BACKBONE_EPOCH = 1  # 1-based epoch index; ignored when not freezing at start.
 
 # LR schedule (independent from freeze/unfreeze schedule).
 USE_DIFFERENTIAL_LR = True
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-2
 BACKBONE_BASE_LR = 1e-5
 HEAD_BASE_LR = 1e-4
 # EPOCH_FRACTION = max(1, NUM_EPOCHS // 3)
-LR_MILESTONES = (6, 8)
-LR_DECAY_FACTOR = 5e-2
+LR_MILESTONES = (9,)
+LR_DECAY_FACTOR = 1e-2
 
 VAL_SPLIT = 0.05
 SEED = 42
 NUM_WORKERS = 4
 
 TH_MULTI_LABEL = 0.5
-THRESHOLD_CANDIDATES = tuple(i / 100 for i in range(4, 97, 4))
+THRESHOLD_CANDIDATES = tuple(i / 100 for i in range(5, 96, 5))
 MBATCH_LOSS_GROUP = -1
 
-EARLY_STOPPING_ENABLED = True
+EARLY_STOPPING_ENABLED = False
 EARLY_STOPPING_PATIENCE = 4
 EARLY_STOPPING_MIN_DELTA = 0.0
 

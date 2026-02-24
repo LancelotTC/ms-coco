@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
+from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR, TRAINED_MODELS_FOLDER
 from dataset_readers import COCOTestImageDataset
 from models_factory import AVAILABLE_MODELS, create_model
 from utils import ProgressBar, print_section, tokenize_float
@@ -14,7 +14,16 @@ BATCH_SIZE = 32
 NUM_WORKERS = 0
 TH_MULTI_LABEL = 0.5
 
+MODEL_PATH = (
+    TRAINED_MODELS_FOLDER
+    / "convnext_tiny"
+    / "best_model_convnext_tiny_ep-18_bs-256to16_tp-uf1-frz1-blr0p000010-hlr0p000100-bs256to16-ga1to4-amp1-ms9_th-0p500_vs-0p050_te-18_ve-1_sd-42_nw-4_nc-80.pt"
+)
+
+
 MODEL_PATH = BEST_MODEL_PATH
+MODEL_PATH = r"C:\Users\Lanxe\OneDrive\Master MINDS M1\Machine Learning Computer Vision\ms-coco\trained_models\swin_t\best_model_swin_t_ep-18_bs-256to16_tp-uf1-frz1-blr0p000010-hlr0p000100-bs256to16-ga1to4-amp1-ms9_th-0p500_vs-0p050_te-18_ve-1_sd-42_nw-4_nc-80.pt"
+
 OUTPUT_PATH = Path("predictions.json")
 
 
@@ -67,7 +76,9 @@ def main() -> None:
     train_batch_size = checkpoint.get("batch_size")
     train_learning_rate = checkpoint.get("learning_rate")
     train_th_multi_label = checkpoint.get("th_multi_label")
-    inference_threshold = float(checkpoint.get("best_threshold", train_th_multi_label if train_th_multi_label is not None else TH_MULTI_LABEL))
+    inference_threshold = float(
+        checkpoint.get("best_threshold", train_th_multi_label if train_th_multi_label is not None else TH_MULTI_LABEL)
+    )
     if model_name not in AVAILABLE_MODELS:
         raise ValueError(f"Model '{model_name}' not supported. Available: {', '.join(AVAILABLE_MODELS)}")
 
@@ -77,10 +88,10 @@ def main() -> None:
         "checkpoint_path": MODEL_PATH,
         "estimated_best_val_f1": f"{float(estimated_f1):.4f}" if estimated_f1 is not None else "n/a",
         "estimated_best_epoch": (
-            f"{best_epoch}of{total_epochs}" if best_epoch is not None and total_epochs is not None else best_epoch
-        )
-        if best_epoch is not None
-        else "n/a",
+            (f"{best_epoch}of{total_epochs}" if best_epoch is not None and total_epochs is not None else best_epoch)
+            if best_epoch is not None
+            else "n/a"
+        ),
         "total_epochs(from_ckpt)": total_epochs if total_epochs is not None else "n/a",
         "train_batch_size(from_ckpt)": train_batch_size if train_batch_size is not None else "n/a",
         "train_learning_rate(from_ckpt)": train_learning_rate if train_learning_rate is not None else "n/a",
@@ -147,10 +158,10 @@ def main() -> None:
         "model_name": model_name,
         "estimated_best_val_f1": f"{float(estimated_f1):.4f}" if estimated_f1 is not None else "n/a",
         "estimated_best_epoch": (
-            f"{best_epoch}of{total_epochs}" if best_epoch is not None and total_epochs is not None else best_epoch
-        )
-        if best_epoch is not None
-        else "n/a",
+            (f"{best_epoch}of{total_epochs}" if best_epoch is not None and total_epochs is not None else best_epoch)
+            if best_epoch is not None
+            else "n/a"
+        ),
         "total_epochs": total_epochs if total_epochs is not None else "n/a",
         "num_test_images": len(test_dataset),
         "predictions_path": output_path,

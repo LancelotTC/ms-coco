@@ -16,9 +16,14 @@ class ModelSpec:
 
 
 MODEL_SPECS = {
+    # ResNet
     "resnet18": ModelSpec(models.resnet18, models.ResNet18_Weights.DEFAULT, "fc"),
     "resnet50": ModelSpec(models.resnet50, models.ResNet50_Weights.DEFAULT, "fc"),
+    #
+    # DenseNet
     "densenet121": ModelSpec(models.densenet121, models.DenseNet121_Weights.DEFAULT, "classifier"),
+    #
+    # MobileNet
     "mobilenet_v2": ModelSpec(models.mobilenet_v2, models.MobileNet_V2_Weights.DEFAULT, "classifier.1"),
     "mobilenet_v3_large": ModelSpec(
         models.mobilenet_v3_large, models.MobileNet_V3_Large_Weights.DEFAULT, "classifier.3"
@@ -26,15 +31,26 @@ MODEL_SPECS = {
     "mobilenet_v3_small": ModelSpec(
         models.mobilenet_v3_small, models.MobileNet_V3_Small_Weights.DEFAULT, "classifier.3"
     ),
+    #
+    # EfficiencyNet
     "efficientnet_b0": ModelSpec(models.efficientnet_b0, models.EfficientNet_B0_Weights.DEFAULT, "classifier.1"),
     "efficientnet_v2_s": ModelSpec(models.efficientnet_v2_s, models.EfficientNet_V2_S_Weights.DEFAULT, "classifier.1"),
+    "efficientnet_b4": ModelSpec(models.efficientnet_b4, models.EfficientNet_B4_Weights.DEFAULT, "classifier.1"),
+    #
+    # Convnext
     "convnext_tiny": ModelSpec(models.convnext_tiny, models.ConvNeXt_Tiny_Weights.DEFAULT, "classifier.2"),
     "convnext_small": ModelSpec(models.convnext_small, models.ConvNeXt_Small_Weights.DEFAULT, "classifier.2"),
+    "convnext_base": ModelSpec(models.convnext_base, models.ConvNeXt_Base_Weights.DEFAULT, "classifier.2"),
+    "convnext_large": ModelSpec(models.convnext_large, models.ConvNeXt_Large_Weights.DEFAULT, "classifier.2"),
+    #
+    # RegNet
     "regnet_y_800mf": ModelSpec(models.regnet_y_800mf, models.RegNet_Y_800MF_Weights.DEFAULT, "fc"),
+    #
+    # SwinT
     "swin_t": ModelSpec(models.swin_t, models.Swin_T_Weights.DEFAULT, "head"),
     "swin_v2_t": ModelSpec(models.swin_v2_t, models.Swin_V2_T_Weights.DEFAULT, "head"),
-    "vgg16": ModelSpec(models.vgg16, models.VGG16_Weights.DEFAULT, "classifier.6"),
-    # "alexnet": ModelSpec(models.alexnet, models.AlexNet_Weights.DEFAULT, "classifier.6"),
+    "swin_v2_s": ModelSpec(models.swin_v2_s, models.Swin_V2_S_Weights.DEFAULT, "head"),
+    "swin_v2_b": ModelSpec(models.swin_v2_b, models.Swin_V2_B_Weights.DEFAULT, "head"),
 }
 
 AVAILABLE_MODELS = tuple(MODEL_SPECS.keys())
