@@ -1,53 +1,75 @@
 # MS-COCO Multi-Label Classification
 
-This project trains and evaluates an image multi-label classifier on an MS-COCO style dataset using transfer learning in PyTorch.
+PyTorch project for 80-class multi-label image classification on an MS-COCO-style dataset.
 
-It supports multiple torchvision backbones, replaces the final classification head with an 80-class `Linear -> BatchNorm1d` logits head, trains on one-hot multi-label targets, and exports test predictions to JSON.
+The code uses torchvision pretrained backbones, replaces the final classifier with `Linear -> BatchNorm1d`, trains with `BCEWithLogitsLoss` (with computed `pos_weight`), tunes the decision threshold on validation, and exports test predictions to JSON.
 
-## What This Repository Contains
+## Repository Contents
 
-- `training.py`: train/validation pipeline, checkpoint saving, optional TensorBoard logging.
-- `testing.py`: loads the best checkpoint and generates predictions for test images.
-- `models_factory.py`: model registry and classifier-head replacement logic.
-- `dataset_readers.py`: train/test dataset loaders.
-- `utils.py`: training loop, validation metrics, and terminal progress bar.
-- `tensorboard_logging.py`: TensorBoard scalar logging helper.
-- `config.py`: dataset paths, class list, model defaults.
-- `predictions.json`: sample output from inference.
+- `training.py`: end-to-end train/validation pipeline, threshold tuning, checkpoint selection/saving.
+- `testing.py`: checkpoint loading and test-set prediction JSON export.
+- `config.py`: paths, class list, base defaults (including `MODEL_NAME`).
+- `models_factory.py`: model registry and classifier-head replacement.
+- `dataset_readers.py`: datasets for train labels (`*.cls`) and test images.
+- `utils.py`: train/validation loops, threshold tuning utility, terminal progress bar.
+- `tensorboard_logging.py`: TensorBoard helper used by `training.py` when enabled.
+- `generate_confusion_matrix.py`: pairwise confusion-matrix generation from a checkpoint.
+- `model_performance_table.py`: checkpoint metadata aggregation to CSV.
+- `sync_pretrained_model_cache.py`: downloads all registered model weights and prunes stale cached files.
+- `get_common_classes.py`: quick check of class-name overlap between COCO classes and model weight metadata.
+- `find_head_path.py`: helper to inspect the last linear layer path for a torchvision model.
+- `The MS COCO classification challenge.ipynb`: assignment/skeleton notebook.
 
 ## Supported Backbones
 
-Defined in `models_factory.py`:
+From `models_factory.py` (`MODEL_SPECS`):
 
 - `resnet18`
 - `resnet50`
 - `densenet121`
 - `mobilenet_v2`
+- `mobilenet_v3_large`
+- `mobilenet_v3_small`
 - `efficientnet_b0`
-- `vgg16`
+- `efficientnet_v2_s`
+- `efficientnet_b4`
+- `convnext_tiny`
+- `convnext_small`
+- `convnext_base`
+- `convnext_large`
+- `regnet_y_800mf`
+- `swin_t`
+- `swin_v2_t`
+- `swin_v2_s`
+- `swin_v2_b`
 
-## Dataset Layout (Expected by Code)
+## Default Paths and Dataset Layout
 
-Paths are derived from `config.py`:
+Defaults are defined in `config.py`:
 
-- Local root: `~/ms-coco`
+- Project root: folder containing this repository
+- Local data root: `~/ms-coco`
 - Dataset root: `~/ms-coco/ms-coco-dataset`
+- Pretrained cache root: `~/ms-coco/pre-trained_models`
+- Trained models root: `<repo>/trained_models`
 
-Expected structure:
+Expected dataset structure:
 
 ```text
 ~/ms-coco/
-|-- ms-coco-dataset/
-|   |-- images/
-|   |   |-- train-resized/      # training images (.jpg)
-|   |   `-- test-resized/       # test images (.jpg)
-|   `-- labels/
-|       `-- train/              # one .cls file per training image
+`-- ms-coco-dataset/
+    |-- images/
+    |   |-- train-resized/   # train images (.jpg)
+    |   `-- test-resized/    # test images (.jpg)
+    `-- labels/
+        `-- train/           # one .cls file per train image
+
+<repo>/
 `-- trained_models/
-    `-- best_model.pt           # created after training
+    `-- best_model.pt        # active checkpoint path used by testing/confusion scripts
 ```
 
-Label files (`*.cls`) should contain one class index per line (0-79), matching COCO class order from `config.py`.
+Each `*.cls` file must contain one class index per line (0-79), matching `config.py::CLASSES`.
 
 ## Installation
 
@@ -63,25 +85,38 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Edit `config.py` to set:
+### `config.py` (global defaults)
 
-- `MODEL_NAME` (default: `resnet18`)
-- directory constants if you do not use the default `~/ms-coco` layout
-- `BEST_MODEL_PATH` (checkpoint output path)
-- `FREEZE_BACKBONE` (used as the initial freeze state in `training.py`)
-- `TRAIN_METRICS_EVERY_N_EPOCHS` (`0` disables extra train-set eval; higher values run it less often)
-- `VAL_EVERY_N_EPOCHS` (run validation every N epochs; final epoch always validates)
-- `EARLY_STOPPING_ENABLED`, `EARLY_STOPPING_PATIENCE`, `EARLY_STOPPING_MIN_DELTA` (stop when validation F1 plateaus)
-- `PRETRAINED_MODELS_FOLDER` (torchvision pretrained-weights cache directory)
+- `MODEL_NAME`: selected model name (currently ends as `convnext_large` due last assignment in file).
+- `BEST_MODEL_PATH`: active checkpoint path.
+- `FREEZE_BACKBONE`: starting freeze state used by `training.py`.
+- `LOCAL_FOLDER`, `DATASET_FOLDER`, `PRETRAINED_MODELS_FOLDER`, `TRAINED_MODELS_FOLDER`.
+- `NUM_CLASSES` and `CLASSES`.
 
-Edit `training.py` / `testing.py` for runtime hyperparameters:
+Note: `TRAIN_METRICS_EVERY_N_EPOCHS` and `VAL_EVERY_N_EPOCHS` also exist in `config.py`, but `training.py` uses its own local constants for those values.
 
-- batch sizes
-- number of epochs
-- freeze milestone settings (`FREEZE_BACKBONE_AT_START`, `UNFREEZE_BACKBONE_EPOCH`)
-- selective fine-tuning depth (`UNFREEZE_LAST_N_BACKBONE_LAYERS`)
-- learning-rate settings (`USE_DIFFERENTIAL_LR`, `LEARNING_RATE` or `BACKBONE_BASE_LR`/`HEAD_BASE_LR`, `LR_MILESTONES`, `LR_DECAY_FACTOR`)
-- threshold for multi-label prediction (`TH_MULTI_LABEL`)
+### `training.py` (runtime knobs)
+
+Key defaults include:
+
+- Epochs/batching: `NUM_EPOCHS=25`, `TRAIN_BATCH_SIZE_FROZEN=256`, `TRAIN_BATCH_SIZE_UNFROZEN=16`, `VAL_BATCH_SIZE=256`.
+- Gradient accumulation: `GRAD_ACCUM_STEPS_FROZEN=1`, `GRAD_ACCUM_STEPS_UNFROZEN=4`.
+- AMP: `USE_AMP=True`, `AMP_DTYPE=torch.float16` (CUDA only).
+- Freeze schedule: start from `FREEZE_BACKBONE`, unfreeze at `UNFREEZE_BACKBONE_EPOCH=1`.
+- Partial unfreeze option: `UNFREEZE_LAST_N_BACKBONE_LAYERS=None` (full unfreeze).
+- LR schedule: differential LR enabled by default (`BACKBONE_BASE_LR=1e-5`, `HEAD_BASE_LR=1e-4`), milestones `(9,)`, decay `1e-2`.
+- Data split: `VAL_SPLIT=0.05`, `SEED=42`, `NUM_WORKERS=4`.
+- Threshold tuning candidates: `0.05 ... 0.95` step `0.05`.
+- Early stopping config present but disabled by default.
+- TensorBoard disabled by default (`USE_TENSORBOARD=False`).
+
+### `testing.py` (runtime knobs)
+
+- `BATCH_SIZE=32`
+- `NUM_WORKERS=0`
+- `TH_MULTI_LABEL=0.5` (used only if checkpoint does not provide thresholds)
+- `MODEL_PATH=BEST_MODEL_PATH`
+- `OUTPUT_PATH=Path("predictions.json")` (base name; actual output filename includes metadata tokens)
 
 ## Training
 
@@ -89,41 +124,22 @@ Edit `training.py` / `testing.py` for runtime hyperparameters:
 python training.py
 ```
 
-Behavior:
+What happens:
 
-- Loads pretrained backbone weights from torchvision.
-- Supports freeze-then-unfreeze with a single milestone:
-- starts with backbone frozen when `FREEZE_BACKBONE_AT_START=True`
-- unfreezes backbone at epoch `UNFREEZE_BACKBONE_EPOCH` (if within total epochs)
-- when unfreezing, you can either unfreeze all backbone layers (`UNFREEZE_LAST_N_BACKBONE_LAYERS=None`) or only the last `n` backbone layers (`UNFREEZE_LAST_N_BACKBONE_LAYERS=<int>`).
-- Learning-rate schedule is independent from freeze/unfreeze and applied through one scheduler over the whole run.
-- Supports either one LR for all params (`LEARNING_RATE`) or differential LR (`BACKBONE_BASE_LR`/`HEAD_BASE_LR`).
-- Uses `BCEWithLogitsLoss` for optimization.
-- Computes class-balanced `pos_weight` from the train split and passes it to `BCEWithLogitsLoss`.
-- Tunes the multi-label threshold on validation (best weighted F1) and saves it in checkpoint metadata as `best_threshold`.
-- Uses `MultiStepLR` milestones (`LR_MILESTONES`) with decay factor `LR_DECAY_FACTOR`.
-- Splits training data into train/validation (`VAL_SPLIT`).
-- Supports speed/quality tradeoff with periodic metrics:
-- train-set evaluation cadence via `TRAIN_METRICS_EVERY_N_EPOCHS`
-- validation cadence via `VAL_EVERY_N_EPOCHS` (with forced final-epoch validation)
-- Optional early stopping by validation F1 plateau, controlled by `EARLY_STOPPING_*` constants.
-- Tracks and selects checkpoints strictly by validation `F1` score.
-- Writes a per-model, config-stable checkpoint path under `trained_models/<model_name>/` where the filename contains config tokens (not metrics).
-- Overwrites that config checkpoint only when a new run achieves a better `F1` than the existing file for the same config.
-- Also updates `BEST_MODEL_PATH` with the selected checkpoint for easy testing.
-- Prints a readable config summary before training and an F1-focused summary after training.
+- Loads selected pretrained backbone and replaces classifier head.
+- Splits train data into train/val subsets (`random_split`, seeded).
+- Computes class-balanced `pos_weight` from the train subset.
+- Trains with optional freeze/unfreeze schedule and gradient accumulation.
+- Tunes threshold on validation using weighted multi-label F1.
+- Tracks run-best checkpoint by validation F1.
+- Saves per-configuration checkpoint in `trained_models/<model_name>/...pt`.
+- Compares against existing config checkpoint and overwrites only if new F1 is better.
+- Writes selected checkpoint to `BEST_MODEL_PATH` for downstream scripts.
 
-Enable TensorBoard in `training.py`:
+TensorBoard:
 
-```python
-USE_TENSORBOARD = True
-```
-
-Then run:
-
-```bash
-tensorboard --logdir runs
-```
+1. Set `USE_TENSORBOARD = True` in `training.py`.
+2. Run `tensorboard --logdir runs`.
 
 ## Inference / Test Prediction
 
@@ -131,51 +147,60 @@ tensorboard --logdir runs
 python testing.py
 ```
 
-Behavior:
+What happens:
 
 - Loads checkpoint from `MODEL_PATH`.
-- Recreates the same model architecture using saved `model_name`.
-- Runs inference on `TEST_IMAGES_DIR`.
-- Prints a readable testing config summary before inference and a summary after inference.
-- Applies `sigmoid` to model logits, then thresholds with checkpoint `best_threshold` (fallback to configured threshold if missing).
-- Writes predictions to a detailed filename that includes model name and available checkpoint metadata (best F1, epoch, batch size, learning rate, threshold), plus testing batch size and threshold.
+- Rebuilds model using `checkpoint["model_name"]` (fallback: `config.MODEL_NAME`).
+- Uses inference threshold in this order: `best_threshold` -> `th_multi_label` -> `testing.py::TH_MULTI_LABEL`.
+- Writes predictions as `{image_id: [class_indices...]}` JSON.
+- Output filename is expanded with metadata (model/F1/epoch/train settings/test settings), e.g. `predictions_<...>.json`.
 
-## Confusion Matrix Image
-
-Configure constants in `generate_confusion_matrix.py`:
-
-- `MODEL_PATH`
-- `SPLIT` (`"val"`, `"train"`, `"all"`)
-- `VAL_SPLIT`, `SEED`
-- `BATCH_SIZE`, `NUM_WORKERS`
-- `TH_MULTI_LABEL` (`None` uses checkpoint threshold)
-- `NORMALIZE` (`"none"`, `"rows"`, `"all"`)
-- `TOP_K_CLASSES` (`0` renders all classes)
-- `OUTPUT_PATH`
-
-Then run:
+## Confusion Matrix
 
 ```bash
 python generate_confusion_matrix.py
 ```
 
-## Results Table (Pandas)
+Script-level config includes:
+
+- `SPLIT`: `"val"`, `"train"`, or `"all"`
+- `VAL_SPLIT`, `SEED`, `BATCH_SIZE`, `NUM_WORKERS`
+- `TH_MULTI_LABEL` (`None` => checkpoint threshold fallback)
+- `NORMALIZE`: `"none"`, `"rows"`, `"all"`
+- `TOP_K_CLASSES` (`0` renders all classes)
+- `OUTPUT_PATH` (default `trained_models/confusion_matrix.png`)
+
+## Checkpoint Report Table
 
 ```bash
 python model_performance_table.py
 ```
 
-This prints a command-line table of saved checkpoints with model name, F1 score, and configuration fields read from checkpoint metadata.
+Behavior:
 
-You can programmatically control sorting and grouping by editing constants at the top of `model_performance_table.py`:
+- Recursively loads checkpoint metadata from `trained_models`.
+- Drops heavy `state_dict` payload and non-F1 metric columns.
+- Optional grouping/sorting via top-of-file constants.
+- Writes CSV to `<trained_models>/model_performance_table.csv`.
 
-- `SORT_BY`
-- `SORT_ASCENDING`
-- `GROUP_BY_COLUMNS`
-- `GROUP_MODE` (`best` or `mean`)
-- `CHECKPOINTS_ROOT`, `CHECKPOINT_GLOB`
+## Pretrained Cache Sync
 
-Output format:
+```bash
+python sync_pretrained_model_cache.py
+```
+
+Behavior:
+
+- Iterates all models in `MODEL_SPECS` and downloads/loads their default weights.
+- Uses `PRETRAINED_MODELS_FOLDER` as torch hub cache root.
+- Removes stale `.pt/.pth` files not referenced by current registry URLs.
+
+## Utility Scripts
+
+- `python get_common_classes.py`: prints overlap between `config.CLASSES` and weight metadata categories.
+- `python find_head_path.py`: quick helper for discovering the last linear head path in a torchvision model.
+
+## Prediction JSON Format
 
 ```json
 {
@@ -184,10 +209,4 @@ Output format:
 }
 ```
 
-Each key is an image filename (without `.jpg`), and each value is a list of predicted class indices.
-
-## Notes
-
-- `NUM_CLASSES` is fixed to 80.
-- Class names are available in `config.py` as `CLASSES`.
-- `NUM_WORKERS` defaults to `0` in both training and testing for compatibility.
+Keys are image filenames without `.jpg`; values are predicted class indices.
