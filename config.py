@@ -18,9 +18,10 @@ TRAIN_LABELS_DIR = LABELS_DIR / "train"
 NUM_CLASSES = 80
 
 # All tested models retained for ease of use. Only last is considered.
-MODEL_NAME = "swin_v2_t"
 MODEL_NAME = "vit_b_16"
+MODEL_NAME = "swin_v2_t"
 MODEL_NAME = "convnext_tiny"
+MODEL_NAME = "regnet_y_800mf"
 
 BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
 FREEZE_BACKBONE = True

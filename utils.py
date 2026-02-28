@@ -2,6 +2,8 @@ import os
 
 import torch
 
+from references import METRIC_ACCURACY, METRIC_F1, METRIC_LOSS, METRIC_PRECISION, METRIC_RECALL
+
 
 def tokenize_float(value: float, precision: int = 4) -> str:
     return f"{value:.{precision}f}".replace(".", "p")
@@ -105,10 +107,10 @@ def _compute_weighted_multilabel_metrics(
     total_positives = freqs.sum()
     accuracy = torch.where(total_positives > 0, tps.sum() / total_positives, torch.tensor(0.0, device=tps.device))
     return {
-        "accuracy": accuracy,
-        "f1": f1,
-        "precision": precision,
-        "recall": recall,
+        METRIC_ACCURACY: accuracy,
+        METRIC_F1: f1,
+        METRIC_PRECISION: precision,
+        METRIC_RECALL: recall,
     }
 
 
@@ -178,13 +180,19 @@ def validation_loop(
     val_loss = loss / size if size > 0 else 0.0
     total_pos = class_total.sum()
     accuracy = class_tp.sum() / total_pos if total_pos > 0 else torch.tensor(0.0)
-    results = {"loss": val_loss, "accuracy": accuracy, "f1": f1, "precision": prec, "recall": recall}
+    results = {
+        METRIC_LOSS: val_loss,
+        METRIC_ACCURACY: accuracy,
+        METRIC_F1: f1,
+        METRIC_PRECISION: prec,
+        METRIC_RECALL: recall,
+    }
 
     if class_metrics:
         class_results = []
         for p, r in zip(class_prec, class_recall):
             f1 = 0 if (p <= 0 or r <= 0) else 2.0 * p * r / (p + r)
-            class_results.append({"f1": f1, "precision": p, "recall": r})
+            class_results.append({METRIC_F1: f1, METRIC_PRECISION: p, METRIC_RECALL: r})
         results = results, class_results
 
     return results
@@ -242,13 +250,19 @@ def tune_threshold_on_validation(
     for threshold in threshold_candidates:
         predictions = torch.where(all_scores > threshold, 1.0, 0.0)
         metrics = _compute_weighted_multilabel_metrics(predictions, all_labels, num_classes)
-        result = {"loss": val_loss, **metrics}
-        if best_results is None or float(result["f1"]) > float(best_results["f1"]):
+        result = {METRIC_LOSS: val_loss, **metrics}
+        if best_results is None or float(result[METRIC_F1]) > float(best_results[METRIC_F1]):
             best_threshold = threshold
             best_results = result
 
     if best_results is None:
-        best_results = {"loss": val_loss, "accuracy": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+        best_results = {
+            METRIC_LOSS: val_loss,
+            METRIC_ACCURACY: 0.0,
+            METRIC_F1: 0.0,
+            METRIC_PRECISION: 0.0,
+            METRIC_RECALL: 0.0,
+        }
     return float(best_threshold), best_results
 
 

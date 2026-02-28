@@ -54,6 +54,7 @@ MODEL_SPECS = {
     #
     # ViT
     "vit_b_16": ModelSpec(models.vit_b_16, models.ViT_B_16_Weights.DEFAULT, "heads.head"),
+    #
 }
 
 AVAILABLE_MODELS = tuple(MODEL_SPECS.keys())

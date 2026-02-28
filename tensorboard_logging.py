@@ -1,3 +1,6 @@
+from references import METRIC_ACCURACY, METRIC_F1, METRIC_LOSS, METRIC_PRECISION, METRIC_RECALL
+
+
 def update_graphs(
     summary_writer,
     epoch,
@@ -18,31 +21,31 @@ def update_graphs(
 
     summary_writer.add_scalars(
         "Losses/Train Loss vs Test Loss",
-        {"Train Loss": train_results["loss"], "Test Loss": test_results["loss"]},
+        {"Train Loss": train_results[METRIC_LOSS], "Test Loss": test_results[METRIC_LOSS]},
         (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
     )
 
     summary_writer.add_scalars(
         "Metrics/Train Accuracy vs Test Accuracy",
-        {"Train Accuracy": train_results["accuracy"], "Test Accuracy": test_results["accuracy"]},
+        {"Train Accuracy": train_results[METRIC_ACCURACY], "Test Accuracy": test_results[METRIC_ACCURACY]},
         (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
     )
 
     summary_writer.add_scalars(
         "Metrics/Train F1 vs Test F1",
-        {"Train F1": train_results["f1"], "Test F1": test_results["f1"]},
+        {"Train F1": train_results[METRIC_F1], "Test F1": test_results[METRIC_F1]},
         (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
     )
 
     summary_writer.add_scalars(
         "Metrics/Train Precision vs Test Precision",
-        {"Train Precision": train_results["precision"], "Test Precision": test_results["precision"]},
+        {"Train Precision": train_results[METRIC_PRECISION], "Test Precision": test_results[METRIC_PRECISION]},
         (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
     )
 
     summary_writer.add_scalars(
         "Metrics/Train Recall vs Test Recall",
-        {"Train Recall": train_results["recall"], "Test Recall": test_results["recall"]},
+        {"Train Recall": train_results[METRIC_RECALL], "Test Recall": test_results[METRIC_RECALL]},
         (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
     )
 
@@ -50,22 +53,22 @@ def update_graphs(
         for i in range(len(train_class_results)):
             summary_writer.add_scalars(
                 f"Class Metrics/{class_names[i]}/Train F1 vs Test F1",
-                {"Train F1": train_class_results[i]["f1"], "Test F1": test_class_results[i]["f1"]},
+                {"Train F1": train_class_results[i][METRIC_F1], "Test F1": test_class_results[i][METRIC_F1]},
                 (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
             )
 
             summary_writer.add_scalars(
                 f"Class Metrics/{class_names[i]}/Train Precision vs Test Precision",
                 {
-                    "Train Precision": train_class_results[i]["precision"],
-                    "Test Precision": test_class_results[i]["precision"],
+                    "Train Precision": train_class_results[i][METRIC_PRECISION],
+                    "Test Precision": test_class_results[i][METRIC_PRECISION],
                 },
                 (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
             )
 
             summary_writer.add_scalars(
                 f"Class Metrics/{class_names[i]}/Train Recall vs Test Recall",
-                {"Train Recall": train_class_results[i]["recall"], "Test Recall": test_class_results[i]["recall"]},
+                {"Train Recall": train_class_results[i][METRIC_RECALL], "Test Recall": test_class_results[i][METRIC_RECALL]},
                 (epoch + 1) if not mbatch_group > 0 else (epoch + 1) * mbatch_count,
             )
     summary_writer.flush()

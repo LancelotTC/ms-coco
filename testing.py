@@ -6,7 +6,22 @@ from torch.utils.data import DataLoader
 
 from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
 from dataset_readers import COCOTestImageDataset
+from metadata_utils import (
+    checkpoint_epoch_token,
+    checkpoint_inference_threshold,
+    checkpoint_model_name,
+    checkpoint_total_epochs,
+)
 from models_factory import AVAILABLE_MODELS, create_model
+from references import (
+    CKPT_BATCH_SIZE,
+    CKPT_BEST_EPOCH,
+    CKPT_BEST_VAL_F1,
+    CKPT_LEARNING_RATE,
+    CKPT_MODEL_NAME,
+    CKPT_STATE_DICT,
+    CKPT_THRESHOLD,
+)
 from utils import ProgressBar, print_section, tokenize_float
 
 
@@ -35,12 +50,9 @@ def _build_predictions_path(
     suffix = base_path.suffix or ".json"
     stem = base_path.stem
     f1_token = tokenize_float(estimated_f1) if estimated_f1 is not None else "na"
-    if best_epoch is not None and total_epochs is not None:
-        epoch_token = f"{best_epoch}of{total_epochs}"
-    elif best_epoch is not None:
-        epoch_token = str(best_epoch)
-    else:
-        epoch_token = "na"
+    from metadata_utils import epoch_token as build_epoch_token
+
+    epoch_token = build_epoch_token(best_epoch, total_epochs)
     train_bs_token = str(train_batch_size) if train_batch_size is not None else "na"
     train_lr_token = tokenize_float(train_learning_rate, precision=6) if train_learning_rate is not None else "na"
     train_th_token = tokenize_float(train_th_multi_label, precision=3) if train_th_multi_label is not None else "na"
@@ -62,16 +74,14 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     checkpoint = torch.load(MODEL_PATH, map_location=device)
-    model_name = checkpoint.get("model_name", MODEL_NAME)
-    estimated_f1 = checkpoint.get("best_val_f1")
-    best_epoch = checkpoint.get("best_epoch")
-    total_epochs = checkpoint.get("total_epochs", checkpoint.get("num_epochs"))
-    train_batch_size = checkpoint.get("batch_size")
-    train_learning_rate = checkpoint.get("learning_rate")
-    train_th_multi_label = checkpoint.get("th_multi_label")
-    inference_threshold = float(
-        checkpoint.get("best_threshold", train_th_multi_label if train_th_multi_label is not None else TH_MULTI_LABEL)
-    )
+    model_name = checkpoint_model_name(checkpoint, MODEL_NAME)
+    estimated_f1 = checkpoint.get(CKPT_BEST_VAL_F1)
+    best_epoch = checkpoint.get(CKPT_BEST_EPOCH)
+    total_epochs = checkpoint_total_epochs(checkpoint)
+    train_batch_size = checkpoint.get(CKPT_BATCH_SIZE)
+    train_learning_rate = checkpoint.get(CKPT_LEARNING_RATE)
+    train_th_multi_label = checkpoint.get(CKPT_THRESHOLD)
+    inference_threshold = checkpoint_inference_threshold(checkpoint, TH_MULTI_LABEL)
     if model_name not in AVAILABLE_MODELS:
         raise ValueError(f"Model '{model_name}' not supported. Available: {', '.join(AVAILABLE_MODELS)}")
 
@@ -80,11 +90,7 @@ def main() -> None:
         "device": device.type,
         "checkpoint_path": MODEL_PATH,
         "estimated_best_val_f1": f"{float(estimated_f1):.4f}" if estimated_f1 is not None else "n/a",
-        "estimated_best_epoch": (
-            (f"{best_epoch}of{total_epochs}" if best_epoch is not None and total_epochs is not None else best_epoch)
-            if best_epoch is not None
-            else "n/a"
-        ),
+        "estimated_best_epoch": checkpoint_epoch_token(checkpoint),
         "total_epochs(from_ckpt)": total_epochs if total_epochs is not None else "n/a",
         "train_batch_size(from_ckpt)": train_batch_size if train_batch_size is not None else "n/a",
         "train_learning_rate(from_ckpt)": train_learning_rate if train_learning_rate is not None else "n/a",
@@ -107,7 +113,7 @@ def main() -> None:
         num_workers=NUM_WORKERS,
     )
 
-    net.load_state_dict(checkpoint["state_dict"])
+    net.load_state_dict(checkpoint[CKPT_STATE_DICT])
     net = net.to(device)
     net.eval()
 
@@ -150,11 +156,7 @@ def main() -> None:
     summary = {
         "model_name": model_name,
         "estimated_best_val_f1": f"{float(estimated_f1):.4f}" if estimated_f1 is not None else "n/a",
-        "estimated_best_epoch": (
-            (f"{best_epoch}of{total_epochs}" if best_epoch is not None and total_epochs is not None else best_epoch)
-            if best_epoch is not None
-            else "n/a"
-        ),
+        "estimated_best_epoch": checkpoint_epoch_token(checkpoint),
         "total_epochs": total_epochs if total_epochs is not None else "n/a",
         "num_test_images": len(test_dataset),
         "predictions_path": output_path,

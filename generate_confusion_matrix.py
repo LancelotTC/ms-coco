@@ -6,7 +6,9 @@ from torch.utils.data import DataLoader, random_split
 
 from config import BEST_MODEL_PATH, CLASSES, MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
 from dataset_readers import COCOTrainImageDataset
+from metadata_utils import checkpoint_inference_threshold, checkpoint_model_name
 from models_factory import AVAILABLE_MODELS, MODEL_SPECS, create_model
+from references import CKPT_STATE_DICT
 from utils import ProgressBar, print_section
 
 
@@ -200,13 +202,11 @@ def generate_confusion_matrix_for_checkpoint(
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(model_path, map_location="cpu")
-    model_name = checkpoint.get("model_name", MODEL_NAME)
+    model_name = checkpoint_model_name(checkpoint, MODEL_NAME)
     if model_name not in AVAILABLE_MODELS:
         raise ValueError(f"Model '{model_name}' not supported. Available: {', '.join(AVAILABLE_MODELS)}")
 
-    threshold = th_multi_label
-    if threshold is None:
-        threshold = float(checkpoint.get("best_threshold", checkpoint.get("th_multi_label", 0.5)))
+    threshold = th_multi_label if th_multi_label is not None else checkpoint_inference_threshold(checkpoint, 0.5)
 
     if print_config:
         config_items = {
@@ -244,7 +244,7 @@ def generate_confusion_matrix_for_checkpoint(
     )
 
     net, _, _ = create_model(model_name, NUM_CLASSES, pretrained=False)
-    net.load_state_dict(checkpoint["state_dict"])
+    net.load_state_dict(checkpoint[CKPT_STATE_DICT])
     net = net.to(device)
     net.eval()
 
@@ -319,10 +319,8 @@ def ensure_confusion_matrix_for_checkpoint(
         }
         try:
             checkpoint = torch.load(model_path, map_location="cpu")
-            summary["model_name"] = checkpoint.get("model_name", MODEL_NAME)
-            summary["threshold"] = float(
-                checkpoint.get("best_threshold", checkpoint.get("th_multi_label", 0.5))
-            )
+            summary["model_name"] = checkpoint_model_name(checkpoint, MODEL_NAME)
+            summary["threshold"] = checkpoint_inference_threshold(checkpoint, 0.5)
         except Exception:
             pass
         if print_summary:

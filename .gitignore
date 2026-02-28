@@ -7,8 +7,14 @@ tempCodeRunnerFile.*
 __pycache__/
 predictions.json
 
-trained_models/
+# trained_models/
+# trained_models_old/
 
 *.ipynb
-*.json
+# *.json
+predictions*
 training.py
+*.pt
+# runs/
+
+

@@ -4,6 +4,7 @@ from pathlib import Path
 import torch
 
 from config import TRAINED_MODELS_FOLDER
+from references import CKPT_STATE_DICT
 
 try:
     import pandas as pd
@@ -36,7 +37,7 @@ def _flatten_dict(data: dict[str, object], prefix: str = "") -> dict[str, object
 
 def _load_checkpoint_row(path: Path) -> dict[str, object]:
     checkpoint = torch.load(path, map_location="cpu")
-    checkpoint = {k: v for k, v in checkpoint.items() if k != "state_dict"}
+    checkpoint = {k: v for k, v in checkpoint.items() if k != CKPT_STATE_DICT}
     row = {
         "row_source": "checkpoint",
         "checkpoint_filename": path.name,

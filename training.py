@@ -17,7 +17,30 @@ from config import (
 )
 from dataset_readers import COCOTrainImageDataset
 from generate_confusion_matrix import ensure_confusion_matrix_for_checkpoint
+from metadata_utils import checkpoint_inference_threshold
 from models_factory import AVAILABLE_MODELS, create_model, freeze_all, unfreeze_last_n_backbone_layers
+from references import (
+    CKPT_BEST_EPOCH,
+    CKPT_BEST_THRESHOLD,
+    CKPT_BEST_VAL_ACCURACY,
+    CKPT_BEST_VAL_F1,
+    CKPT_BEST_VAL_LOSS,
+    CKPT_BEST_VAL_PRECISION,
+    CKPT_BEST_VAL_RECALL,
+    CKPT_BATCH_SIZE,
+    CKPT_LEARNING_RATE,
+    CKPT_LEARNING_RATES,
+    CKPT_MODEL_NAME,
+    CKPT_RUN_DURATION_SECONDS,
+    CKPT_STATE_DICT,
+    CKPT_THRESHOLD,
+    CKPT_TOTAL_EPOCHS,
+    METRIC_ACCURACY,
+    METRIC_F1,
+    METRIC_LOSS,
+    METRIC_PRECISION,
+    METRIC_RECALL,
+)
 from utils import print_section, tokenize_float, train_loop, tune_threshold_on_validation, validation_loop
 
 try:
@@ -30,34 +53,35 @@ except ModuleNotFoundError:
     TENSORBOARD_AVAILABLE = False
 
 # Memory-aware batch schedule.
-TRAIN_BATCH_SIZE_FROZEN = 64
+TRAIN_BATCH_SIZE_FROZEN = 32
 TRAIN_BATCH_SIZE_UNFROZEN = 16
-VAL_BATCH_SIZE = 64
+VAL_BATCH_SIZE = 32
 
 # Keep effective batch size high even when unfrozen batch must be small.
 GRAD_ACCUM_STEPS_FROZEN = 1
-GRAD_ACCUM_STEPS_UNFROZEN = 4
+GRAD_ACCUM_STEPS_UNFROZEN = 1
 
 USE_AMP = True
 AMP_DTYPE = torch.float16
 
-NUM_EPOCHS = 20
-# Intentionally run train metrics only once, at the final epoch.
-TRAIN_METRICS_EVERY_N_EPOCHS = NUM_EPOCHS
+NUM_EPOCHS = 14
+
+TRAIN_METRICS_EVERY_N_EPOCHS = 2
 VAL_EVERY_N_EPOCHS = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
 FREEZE_BACKBONE_AT_START = FREEZE_BACKBONE
-UNFREEZE_BACKBONE_EPOCH = 1  # 1-based epoch index; ignored when not freezing at start.
+UNFREEZE_BACKBONE_EPOCH = NUM_EPOCHS // 2  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
-UNFREEZE_LAST_N_BACKBONE_LAYERS = None
+UNFREEZE_LAST_N_BACKBONE_LAYERS = 2
+
+LEARNING_RATE = 1e-2  # Base LR, unused if USE_DIFFERENTIAL_LR == True
 
 # LR schedule (independent from freeze/unfreeze schedule).
 USE_DIFFERENTIAL_LR = True
-LEARNING_RATE = 1e-2
 BACKBONE_BASE_LR = 1e-5
 HEAD_BASE_LR = 1e-4
-LR_MILESTONES = (9,)
+LR_MILESTONES = (max(1, NUM_EPOCHS // 2),)
 LR_DECAY_FACTOR = 1e-2
 
 VAL_SPLIT = 0.05
@@ -317,10 +341,14 @@ def main() -> None:
 
     net = net.to(device)
     head_params_list = list(head_params)
-    current_mode_text, active_backbone_layers = _configure_trainable_state(net, head_params_list, FREEZE_BACKBONE_AT_START)
+    current_mode_text, active_backbone_layers = _configure_trainable_state(
+        net, head_params_list, FREEZE_BACKBONE_AT_START
+    )
     print(f"Training mode at start: {current_mode_text}")
     if active_backbone_layers and active_backbone_layers != ["<all backbone layers>"]:
-        print(f"Trainable backbone layers at start ({len(active_backbone_layers)}): {', '.join(active_backbone_layers)}")
+        print(
+            f"Trainable backbone layers at start ({len(active_backbone_layers)}): {', '.join(active_backbone_layers)}"
+        )
 
     should_unfreeze_later = FREEZE_BACKBONE_AT_START and 1 <= UNFREEZE_BACKBONE_EPOCH <= NUM_EPOCHS
     if should_unfreeze_later:
@@ -340,6 +368,8 @@ def main() -> None:
     run_best_checkpoint = None
     last_train_results = None
     last_val_results = None
+    last_tuned_threshold = TH_MULTI_LABEL
+    ran_train_eval_last_epoch = False
     no_improve_eval_count = 0
     completed_epochs = 0
     early_stopped = False
@@ -366,8 +396,7 @@ def main() -> None:
             )
             if active_backbone_layers and active_backbone_layers != ["<all backbone layers>"]:
                 print(
-                    "Unfrozen backbone layers "
-                    f"({len(active_backbone_layers)}): {', '.join(active_backbone_layers)}"
+                    "Unfrozen backbone layers " f"({len(active_backbone_layers)}): {', '.join(active_backbone_layers)}"
                 )
 
         lr_values = [f"{group['lr']:.6g}" for group in optimizer.param_groups]
@@ -416,6 +445,7 @@ def main() -> None:
                 apply_sigmoid=True,
             )
             last_val_results = val_results
+            last_tuned_threshold = tuned_threshold
 
         if run_train_metrics:
             train_eval_threshold = tuned_threshold if run_val_metrics else run_best_threshold
@@ -432,6 +462,7 @@ def main() -> None:
                 apply_sigmoid=True,
             )
             last_train_results = train_results
+        ran_train_eval_last_epoch = train_results is not None
 
         if summary_writer and train_results is not None and val_results is not None:
             update_graphs(
@@ -445,24 +476,24 @@ def main() -> None:
             )
 
         if val_results is not None:
-            current_metric = float(val_results["f1"])
+            current_metric = float(val_results[METRIC_F1])
             if current_metric > run_best_f1 + EARLY_STOPPING_MIN_DELTA:
                 run_best_f1 = current_metric
                 run_best_epoch = epoch_index
                 run_best_threshold = tuned_threshold
                 no_improve_eval_count = 0
                 run_best_checkpoint = {
-                    "model_name": MODEL_NAME,
-                    "state_dict": net.state_dict(),
-                    "best_val_f1": run_best_f1,
-                    "best_val_loss": float(val_results["loss"]),
-                    "best_val_accuracy": float(val_results["accuracy"]),
-                    "best_val_precision": float(val_results["precision"]),
-                    "best_val_recall": float(val_results["recall"]),
-                    "best_epoch": run_best_epoch,
-                    "total_epochs": NUM_EPOCHS,
-                    "best_threshold": run_best_threshold,
-                    "batch_size": train_batch_size_now,
+                    CKPT_MODEL_NAME: MODEL_NAME,
+                    CKPT_STATE_DICT: net.state_dict(),
+                    CKPT_BEST_VAL_F1: run_best_f1,
+                    CKPT_BEST_VAL_LOSS: float(val_results[METRIC_LOSS]),
+                    CKPT_BEST_VAL_ACCURACY: float(val_results[METRIC_ACCURACY]),
+                    CKPT_BEST_VAL_PRECISION: float(val_results[METRIC_PRECISION]),
+                    CKPT_BEST_VAL_RECALL: float(val_results[METRIC_RECALL]),
+                    CKPT_BEST_EPOCH: run_best_epoch,
+                    CKPT_TOTAL_EPOCHS: NUM_EPOCHS,
+                    CKPT_BEST_THRESHOLD: run_best_threshold,
+                    CKPT_BATCH_SIZE: train_batch_size_now,
                     "train_batch_size_frozen": TRAIN_BATCH_SIZE_FROZEN,
                     "train_batch_size_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN,
                     "val_batch_size": VAL_BATCH_SIZE,
@@ -471,8 +502,8 @@ def main() -> None:
                     "effective_batch_frozen": TRAIN_BATCH_SIZE_FROZEN * GRAD_ACCUM_STEPS_FROZEN,
                     "effective_batch_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN * GRAD_ACCUM_STEPS_UNFROZEN,
                     "use_amp": USE_AMP,
-                    "learning_rate": float(optimizer.param_groups[0]["lr"]),
-                    "learning_rates": [float(group["lr"]) for group in optimizer.param_groups],
+                    CKPT_LEARNING_RATE: float(optimizer.param_groups[0]["lr"]),
+                    CKPT_LEARNING_RATES: [float(group["lr"]) for group in optimizer.param_groups],
                     "use_differential_lr": USE_DIFFERENTIAL_LR,
                     "base_learning_rate": LEARNING_RATE if not USE_DIFFERENTIAL_LR else None,
                     "backbone_base_lr": BACKBONE_BASE_LR if USE_DIFFERENTIAL_LR else None,
@@ -483,7 +514,7 @@ def main() -> None:
                     "unfreeze_backbone_epoch": UNFREEZE_BACKBONE_EPOCH if should_unfreeze_later else None,
                     "unfreeze_last_n_backbone_layers": UNFREEZE_LAST_N_BACKBONE_LAYERS,
                     "training_plan_token": training_plan_token,
-                    "th_multi_label": TH_MULTI_LABEL,
+                    CKPT_THRESHOLD: TH_MULTI_LABEL,
                     "val_split": VAL_SPLIT,
                     "train_metrics_every_n_epochs": TRAIN_METRICS_EVERY_N_EPOCHS,
                     "val_every_n_epochs": VAL_EVERY_N_EPOCHS,
@@ -501,8 +532,8 @@ def main() -> None:
             else:
                 no_improve_eval_count += 1
 
-        train_f1_text = f"{float(train_results['f1']):.4f}" if train_results is not None else "skipped"
-        val_f1_text = f"{float(val_results['f1']):.4f}" if val_results is not None else "skipped"
+        train_f1_text = f"{float(train_results[METRIC_F1]):.4f}" if train_results is not None else "skipped"
+        val_f1_text = f"{float(val_results[METRIC_F1]):.4f}" if val_results is not None else "skipped"
         epoch_seconds = int(time.perf_counter() - epoch_start)
         print(
             f"Done: Epoch {epoch_index}/{NUM_EPOCHS} "
@@ -527,6 +558,22 @@ def main() -> None:
             print(f"Early stopping at epoch {epoch_index}/{NUM_EPOCHS}: " f"{early_stop_reason}")
             break
 
+    if completed_epochs > 0 and not ran_train_eval_last_epoch:
+        final_train_eval_threshold = last_tuned_threshold if last_val_results is not None else run_best_threshold
+        print("Running final train evaluation at training end " f"(threshold={final_train_eval_threshold:.2f})...")
+        last_train_results = validation_loop(
+            train_loader,
+            net,
+            criterion,
+            NUM_CLASSES,
+            device,
+            multi_label=True,
+            th_multi_label=final_train_eval_threshold,
+            one_hot=True,
+            progress_label="    Final Train Eval",
+            apply_sigmoid=True,
+        )
+
     if summary_writer:
         summary_writer.close()
 
@@ -543,11 +590,9 @@ def main() -> None:
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     torch.save(run_best_checkpoint, MODEL_PATH)
 
-    net.load_state_dict(run_best_checkpoint["state_dict"])
+    net.load_state_dict(run_best_checkpoint[CKPT_STATE_DICT])
     net.eval()
-    selected_threshold = float(
-        run_best_checkpoint.get("best_threshold", run_best_checkpoint.get("th_multi_label", TH_MULTI_LABEL))
-    )
+    selected_threshold = checkpoint_inference_threshold(run_best_checkpoint, TH_MULTI_LABEL)
     selected_train_results = validation_loop(
         train_loader,
         net,
@@ -560,8 +605,8 @@ def main() -> None:
         progress_label="    Train Eval",
         apply_sigmoid=True,
     )
-    selected_train_f1 = float(selected_train_results["f1"])
-    selected_val_f1 = float(run_best_checkpoint["best_val_f1"])
+    selected_train_f1 = float(selected_train_results[METRIC_F1])
+    selected_val_f1 = float(run_best_checkpoint[CKPT_BEST_VAL_F1])
 
     confusion_matrix_error = None
     confusion_matrix_summary = None
@@ -588,7 +633,7 @@ def main() -> None:
     run_finished_at = datetime.now(timezone.utc)
     run_duration_seconds = round((run_finished_at - run_started_at).total_seconds(), 3)
     run_best_checkpoint["run_finished_at_utc"] = run_finished_at.isoformat()
-    run_best_checkpoint["run_duration_seconds"] = run_duration_seconds
+    run_best_checkpoint[CKPT_RUN_DURATION_SECONDS] = run_duration_seconds
     torch.save(run_best_checkpoint, run_model_path)
     torch.save(run_best_checkpoint, MODEL_PATH)
 
@@ -649,17 +694,17 @@ def main() -> None:
             "train_labels_dir": TRAIN_LABELS_DIR,
         },
         "results": {
-            "best_epoch": int(run_best_checkpoint["best_epoch"]),
-            "total_epochs": int(run_best_checkpoint["total_epochs"]),
+            "best_epoch": int(run_best_checkpoint[CKPT_BEST_EPOCH]),
+            "total_epochs": int(run_best_checkpoint[CKPT_TOTAL_EPOCHS]),
             "best_val_f1": selected_val_f1,
-            "best_val_loss": float(run_best_checkpoint.get("best_val_loss", 0.0)),
-            "best_val_accuracy": float(run_best_checkpoint.get("best_val_accuracy", 0.0)),
-            "best_val_precision": float(run_best_checkpoint.get("best_val_precision", 0.0)),
-            "best_val_recall": float(run_best_checkpoint.get("best_val_recall", 0.0)),
+            "best_val_loss": float(run_best_checkpoint.get(CKPT_BEST_VAL_LOSS, 0.0)),
+            "best_val_accuracy": float(run_best_checkpoint.get(CKPT_BEST_VAL_ACCURACY, 0.0)),
+            "best_val_precision": float(run_best_checkpoint.get(CKPT_BEST_VAL_PRECISION, 0.0)),
+            "best_val_recall": float(run_best_checkpoint.get(CKPT_BEST_VAL_RECALL, 0.0)),
             "best_threshold": selected_threshold,
             "selected_train_f1_eval": selected_train_f1,
-            "last_train_f1": float(last_train_results["f1"]) if last_train_results else None,
-            "last_val_f1": float(last_val_results["f1"]) if last_val_results else None,
+            "last_train_f1": float(last_train_results[METRIC_F1]) if last_train_results else None,
+            "last_val_f1": float(last_val_results[METRIC_F1]) if last_val_results else None,
             "completed_epochs": completed_epochs,
             "early_stopped": early_stopped,
             "early_stop_reason": early_stop_reason,
@@ -682,7 +727,7 @@ def main() -> None:
         "model_name": MODEL_NAME,
         "run_id": run_id,
         "run_dir": run_output_dir,
-        "best_epoch": f"{run_best_checkpoint['best_epoch']}of{run_best_checkpoint['total_epochs']}",
+        "best_epoch": f"{run_best_checkpoint[CKPT_BEST_EPOCH]}of{run_best_checkpoint[CKPT_TOTAL_EPOCHS]}",
         "best_val_f1": f"{selected_val_f1:.4f}",
         "best_threshold": f"{selected_threshold:.2f}",
         "selected_train_f1_eval": f"{selected_train_f1:.4f}",
