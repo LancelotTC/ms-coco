@@ -1,20 +1,5 @@
-/images
-/labels
-
 tempCodeRunnerFile.*
-*.ipynb
+predictions*
+*.pt
 
 __pycache__/
-predictions.json
-
-# trained_models/
-# trained_models_old/
-
-*.ipynb
-# *.json
-predictions*
-training.py
-*.pt
-# runs/
-
-
