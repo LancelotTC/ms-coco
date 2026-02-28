@@ -71,9 +71,9 @@ VAL_EVERY_N_EPOCHS = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
 FREEZE_BACKBONE_AT_START = FREEZE_BACKBONE
-UNFREEZE_BACKBONE_EPOCH = NUM_EPOCHS // 2  # 1-based epoch index; ignored when not freezing at start.
+UNFREEZE_BACKBONE_EPOCH = 1  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
-UNFREEZE_LAST_N_BACKBONE_LAYERS = 2
+UNFREEZE_LAST_N_BACKBONE_LAYERS = None
 
 LEARNING_RATE = 1e-2  # Base LR, unused if USE_DIFFERENTIAL_LR == True
 
