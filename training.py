@@ -66,9 +66,9 @@ GRAD_ACCUM_STEPS_UNFROZEN: int = 1
 USE_AMP: bool = True
 AMP_DTYPE: torch.dtype = torch.float16
 
-NUM_EPOCHS: int = 14
+NUM_EPOCHS: int = 2
 
-TRAIN_METRICS_EVERY_N_EPOCHS: int = 2
+TRAIN_METRICS_EVERY_N_EPOCHS: int = 1
 VAL_EVERY_N_EPOCHS: int = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
@@ -106,6 +106,7 @@ ACTIVE_CHECKPOINT_FILENAME: str = BEST_MODEL_PATH.name
 MODEL_PATH: Path = TRAINED_MODELS_ROOT / ACTIVE_CHECKPOINT_FILENAME
 RUN_CONFIG_FILENAME: str = "run_config.json"
 RUN_CONFUSION_MATRIX_FILENAME: str = "confusion_matrix.png"
+TENSORBOARD_RUNS_DIRNAME: str = "tensorboard_runs"
 
 
 def should_run_eval(epoch: int, every_n_epochs: int, force_last: bool, total_epochs: int) -> bool:
@@ -156,6 +157,18 @@ def build_run_output_dir(root: Path, model_name: str, started_at: datetime) -> t
         suffix += 1
     run_dir.mkdir(parents=True, exist_ok=False)
     return run_dir, run_dir.name
+
+
+def build_tensorboard_run_name(run_id: str) -> str:
+    return (
+        f"{MODEL_NAME}"
+        f"_ep{NUM_EPOCHS}"
+        f"_bs{TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}"
+        f"_ga{GRAD_ACCUM_STEPS_FROZEN}to{GRAD_ACCUM_STEPS_UNFROZEN}"
+        f"_uf{UNFREEZE_BACKBONE_EPOCH if FREEZE_BACKBONE_AT_START else 'none'}"
+        f"_lr{'diff' if USE_DIFFERENTIAL_LR else tokenize_float(LEARNING_RATE, precision=6)}"
+        f"_{run_id}"
+    )
 
 
 def json_default(value: object):
@@ -277,6 +290,9 @@ def main() -> None:
     run_model_path = run_output_dir / ACTIVE_CHECKPOINT_FILENAME
     run_config_path = run_output_dir / RUN_CONFIG_FILENAME
     run_confusion_matrix_path = run_output_dir / RUN_CONFUSION_MATRIX_FILENAME
+    tensorboard_runs_root = TRAINED_MODELS_ROOT / TENSORBOARD_RUNS_DIRNAME
+    tensorboard_run_name = build_tensorboard_run_name(run_id)
+    tensorboard_log_dir = tensorboard_runs_root / tensorboard_run_name
 
     training_config = {
         "model_name": MODEL_NAME,
@@ -319,6 +335,7 @@ def main() -> None:
         "run_model_path": run_model_path,
         "run_config_path": run_config_path,
         "run_confusion_matrix_path": run_confusion_matrix_path,
+        "tensorboard_log_dir": tensorboard_log_dir,
         "active_checkpoint_filename": ACTIVE_CHECKPOINT_FILENAME,
         "active_checkpoint_path": MODEL_PATH,
     }
@@ -380,7 +397,8 @@ def main() -> None:
     early_stop_reason = "none"
     summary_writer = None
     if USE_TENSORBOARD and TENSORBOARD_AVAILABLE:
-        summary_writer = SummaryWriter()
+        tensorboard_log_dir.mkdir(parents=True, exist_ok=True)
+        summary_writer = SummaryWriter(log_dir=str(tensorboard_log_dir))
 
     backbone_is_unfrozen = not FREEZE_BACKBONE_AT_START
     for epoch in range(NUM_EPOCHS):
@@ -418,6 +436,8 @@ def main() -> None:
             force_last=True,
             total_epochs=NUM_EPOCHS,
         )
+        if summary_writer and run_val_metrics:
+            run_train_metrics = True
 
         mbatch_losses = train_loop(
             train_loader,
@@ -478,6 +498,8 @@ def main() -> None:
                 mbatch_count=len(train_loader),
                 mbatch_losses=mbatch_losses or [],
             )
+            for lr_group_index, param_group in enumerate(optimizer.param_groups):
+                summary_writer.add_scalar(f"LR/Group{lr_group_index}", float(param_group["lr"]), epoch_index)
 
         if val_results is not None:
             current_metric = float(val_results[METRIC_F1])
@@ -723,6 +745,7 @@ def main() -> None:
             "confusion_matrix_exists": run_confusion_matrix_path.exists(),
             "confusion_matrix_summary": confusion_matrix_summary,
             "confusion_matrix_error": confusion_matrix_error,
+            "tensorboard_log_dir": tensorboard_log_dir,
         },
     }
     write_json(run_config_path, run_metadata)
