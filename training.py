@@ -66,16 +66,16 @@ GRAD_ACCUM_STEPS_UNFROZEN: int = 1
 USE_AMP: bool = True
 AMP_DTYPE: torch.dtype = torch.float16
 
-NUM_EPOCHS: int = 2
+NUM_EPOCHS: int = 14
 
 TRAIN_METRICS_EVERY_N_EPOCHS: int = 1
 VAL_EVERY_N_EPOCHS: int = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
 FREEZE_BACKBONE_AT_START: bool = FREEZE_BACKBONE
-UNFREEZE_BACKBONE_EPOCH: int = 1  # 1-based epoch index; ignored when not freezing at start.
+UNFREEZE_BACKBONE_EPOCH: int = 5  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
-UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = None
+UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = 3
 
 # Base LR used only when `USE_DIFFERENTIAL_LR` is disabled.
 LEARNING_RATE: float = 1e-2
