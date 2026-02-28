@@ -51,6 +51,9 @@ MODEL_SPECS = {
     "swin_v2_t": ModelSpec(models.swin_v2_t, models.Swin_V2_T_Weights.DEFAULT, "head"),
     "swin_v2_s": ModelSpec(models.swin_v2_s, models.Swin_V2_S_Weights.DEFAULT, "head"),
     "swin_v2_b": ModelSpec(models.swin_v2_b, models.Swin_V2_B_Weights.DEFAULT, "head"),
+    #
+    # ViT
+    "vit_b_16": ModelSpec(models.vit_b_16, models.ViT_B_16_Weights.DEFAULT, "heads.head"),
 }
 
 AVAILABLE_MODELS = tuple(MODEL_SPECS.keys())

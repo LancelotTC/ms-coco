@@ -11,10 +11,12 @@ from utils import ProgressBar, print_section
 
 
 MODEL_PATH = BEST_MODEL_PATH
+RUNS_ROOT = BEST_MODEL_PATH.parent
 
 # Dataset split options: "val", "train", "all"
 SPLIT = "val"
 VAL_SPLIT = 0.05
+
 SEED = 42
 
 BATCH_SIZE = 64
@@ -28,6 +30,12 @@ NORMALIZE = "rows"
 TOP_K_CLASSES = 40  # 0 => render all classes
 OUTPUT_PATH = Path("trained_models") / "confusion_matrix.png"
 
+# Batch generation over run folders:
+GENERATE_FOR_ALL_RUNS = True
+RUN_CHECKPOINT_FILENAME = "best_model.pt"
+RUN_CONFUSION_MATRIX_FILENAME = "confusion_matrix.png"
+OVERWRITE_EXISTING = False
+
 
 def _resolve_transform(model_name: str):
     spec = MODEL_SPECS.get(model_name)
@@ -36,21 +44,30 @@ def _resolve_transform(model_name: str):
     return spec.weights.transforms()
 
 
-def _validate_config() -> None:
-    if SPLIT not in {"val", "train", "all"}:
+def _validate_args(
+    *,
+    model_path: Path,
+    split: str,
+    val_split: float,
+    batch_size: int,
+    top_k_classes: int,
+    normalize: str,
+    th_multi_label: float | None,
+) -> None:
+    if split not in {"val", "train", "all"}:
         raise ValueError("SPLIT must be one of: 'val', 'train', 'all'.")
-    if VAL_SPLIT <= 0 or VAL_SPLIT >= 1:
+    if val_split <= 0 or val_split >= 1:
         raise ValueError("VAL_SPLIT must be between 0 and 1.")
-    if BATCH_SIZE < 1:
+    if batch_size < 1:
         raise ValueError("BATCH_SIZE must be >= 1.")
-    if TOP_K_CLASSES < 0:
+    if top_k_classes < 0:
         raise ValueError("TOP_K_CLASSES must be >= 0.")
-    if NORMALIZE not in {"none", "rows", "all"}:
+    if normalize not in {"none", "rows", "all"}:
         raise ValueError("NORMALIZE must be one of: 'none', 'rows', 'all'.")
-    if TH_MULTI_LABEL is not None and (TH_MULTI_LABEL < 0 or TH_MULTI_LABEL > 1):
+    if th_multi_label is not None and (th_multi_label < 0 or th_multi_label > 1):
         raise ValueError("TH_MULTI_LABEL must be between 0 and 1 when set.")
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {MODEL_PATH}")
+    if not model_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {model_path}")
 
 
 def _select_dataset(
@@ -156,50 +173,73 @@ def _plot_confusion_matrix(
     plt.close(fig)
 
 
-def main() -> None:
-    _validate_config()
-
+def generate_confusion_matrix_for_checkpoint(
+    *,
+    model_path: Path,
+    output_path: Path,
+    split: str = "val",
+    val_split: float = 0.05,
+    seed: int = 42,
+    batch_size: int = 64,
+    num_workers: int = 0,
+    th_multi_label: float | None = None,
+    normalize: str = "rows",
+    top_k_classes: int = 40,
+    progress_label: str = "    Evaluating",
+    print_config: bool = True,
+    print_summary: bool = True,
+) -> dict[str, object]:
+    _validate_args(
+        model_path=model_path,
+        split=split,
+        val_split=val_split,
+        batch_size=batch_size,
+        top_k_classes=top_k_classes,
+        normalize=normalize,
+        th_multi_label=th_multi_label,
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    checkpoint = torch.load(MODEL_PATH, map_location="cpu")
+    checkpoint = torch.load(model_path, map_location="cpu")
     model_name = checkpoint.get("model_name", MODEL_NAME)
     if model_name not in AVAILABLE_MODELS:
         raise ValueError(f"Model '{model_name}' not supported. Available: {', '.join(AVAILABLE_MODELS)}")
 
-    threshold = TH_MULTI_LABEL
+    threshold = th_multi_label
     if threshold is None:
         threshold = float(checkpoint.get("best_threshold", checkpoint.get("th_multi_label", 0.5)))
 
-    config_items = {
-        "model_path": MODEL_PATH,
-        "model_name": model_name,
-        "split": SPLIT,
-        "val_split": VAL_SPLIT,
-        "seed": SEED,
-        "batch_size": BATCH_SIZE,
-        "num_workers": NUM_WORKERS,
-        "threshold": threshold,
-        "normalize": NORMALIZE,
-        "top_k_classes": TOP_K_CLASSES if TOP_K_CLASSES > 0 else "all",
-        "device": device.type,
-        "output_path": OUTPUT_PATH,
-    }
-    print_section("CONFUSION MATRIX CONFIG", config_items)
+    if print_config:
+        config_items = {
+            "model_path": model_path,
+            "model_name": model_name,
+            "split": split,
+            "val_split": val_split,
+            "seed": seed,
+            "batch_size": batch_size,
+            "num_workers": num_workers,
+            "threshold": threshold,
+            "normalize": normalize,
+            "top_k_classes": top_k_classes if top_k_classes > 0 else "all",
+            "device": device.type,
+            "output_path": output_path,
+        }
+        print_section("CONFUSION MATRIX CONFIG", config_items)
 
     transform = _resolve_transform(model_name)
     dataset = COCOTrainImageDataset(TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR, transform=transform)
     selected_dataset = _select_dataset(
         dataset,
-        split=SPLIT,
-        val_split=VAL_SPLIT,
-        seed=SEED,
+        split=split,
+        val_split=val_split,
+        seed=seed,
     )
     if len(selected_dataset) == 0:
         raise RuntimeError("Selected dataset split is empty; cannot generate a confusion matrix.")
     dataloader = DataLoader(
         selected_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         shuffle=False,
-        num_workers=NUM_WORKERS,
+        num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
     )
 
@@ -209,7 +249,7 @@ def main() -> None:
     net.eval()
 
     confusion_matrix = torch.zeros((NUM_CLASSES, NUM_CLASSES), dtype=torch.int64)
-    progress_bar = ProgressBar(total=len(dataloader), start_at=0, label="    Evaluating")
+    progress_bar = ProgressBar(total=len(dataloader), start_at=0, label=progress_label)
     with torch.no_grad():
         for images, labels in dataloader:
             images = images.to(device)
@@ -223,24 +263,203 @@ def main() -> None:
     plot_matrix, plot_labels = _build_plot_data(
         confusion_matrix,
         CLASSES,
-        normalize=NORMALIZE,
-        top_k_classes=TOP_K_CLASSES,
+        normalize=normalize,
+        top_k_classes=top_k_classes,
     )
-    plot_title = f"Pairwise confusion matrix ({model_name}, split={SPLIT}, th={threshold:.2f})"
+    plot_title = f"Pairwise confusion matrix ({model_name}, split={split}, th={threshold:.2f})"
     _plot_confusion_matrix(
         plot_matrix,
         plot_labels,
         title=plot_title,
-        normalize=NORMALIZE,
-        output_path=OUTPUT_PATH,
+        normalize=normalize,
+        output_path=output_path,
     )
 
     summary = {
+        "model_name": model_name,
+        "threshold": float(threshold),
+        "split": split,
         "num_samples": len(selected_dataset),
         "classes_rendered": len(plot_labels),
-        "output_path": OUTPUT_PATH,
+        "output_path": str(output_path),
     }
-    print_section("CONFUSION MATRIX SUMMARY", summary)
+    if print_summary:
+        print_section("CONFUSION MATRIX SUMMARY", summary)
+    return summary
+
+
+def ensure_confusion_matrix_for_checkpoint(
+    *,
+    model_path: Path,
+    output_path: Path | None = None,
+    overwrite: bool = False,
+    split: str = "val",
+    val_split: float = 0.05,
+    seed: int = 42,
+    batch_size: int = 64,
+    num_workers: int = 0,
+    th_multi_label: float | None = None,
+    normalize: str = "rows",
+    top_k_classes: int = 40,
+    progress_label: str = "    Evaluating",
+    print_config: bool = True,
+    print_summary: bool = True,
+) -> dict[str, object]:
+    resolved_output_path = output_path if output_path is not None else model_path.parent / RUN_CONFUSION_MATRIX_FILENAME
+    if resolved_output_path.exists() and not overwrite:
+        summary = {
+            "model_name": "unknown",
+            "threshold": None,
+            "split": split,
+            "num_samples": 0,
+            "classes_rendered": 0,
+            "output_path": str(resolved_output_path),
+            "generated": False,
+            "skipped_existing": True,
+        }
+        try:
+            checkpoint = torch.load(model_path, map_location="cpu")
+            summary["model_name"] = checkpoint.get("model_name", MODEL_NAME)
+            summary["threshold"] = float(
+                checkpoint.get("best_threshold", checkpoint.get("th_multi_label", 0.5))
+            )
+        except Exception:
+            pass
+        if print_summary:
+            print_section("CONFUSION MATRIX SUMMARY", summary)
+        return summary
+
+    summary = generate_confusion_matrix_for_checkpoint(
+        model_path=model_path,
+        output_path=resolved_output_path,
+        split=split,
+        val_split=val_split,
+        seed=seed,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        th_multi_label=th_multi_label,
+        normalize=normalize,
+        top_k_classes=top_k_classes,
+        progress_label=progress_label,
+        print_config=print_config,
+        print_summary=print_summary,
+    )
+    summary["generated"] = True
+    summary["skipped_existing"] = False
+    return summary
+
+
+def generate_missing_confusion_matrices_for_runs(
+    *,
+    runs_root: Path,
+    checkpoint_filename: str = "best_model.pt",
+    confusion_matrix_filename: str = "confusion_matrix.png",
+    overwrite: bool = False,
+    split: str = "val",
+    val_split: float = 0.05,
+    seed: int = 42,
+    batch_size: int = 64,
+    num_workers: int = 0,
+    th_multi_label: float | None = None,
+    normalize: str = "rows",
+    top_k_classes: int = 40,
+) -> dict[str, object]:
+    checkpoint_paths = []
+    for path in sorted(runs_root.glob(f"**/{checkpoint_filename}")):
+        if path.parent == runs_root:
+            continue
+        checkpoint_paths.append(path)
+
+    total = len(checkpoint_paths)
+    generated = 0
+    skipped = 0
+    failed = 0
+    failures: list[dict[str, str]] = []
+
+    for index, checkpoint_path in enumerate(checkpoint_paths, start=1):
+        output_path = checkpoint_path.parent / confusion_matrix_filename
+        run_label = f"    Confusion [{index}/{total}]"
+        try:
+            summary = ensure_confusion_matrix_for_checkpoint(
+                model_path=checkpoint_path,
+                output_path=output_path,
+                overwrite=overwrite,
+                split=split,
+                val_split=val_split,
+                seed=seed,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                th_multi_label=th_multi_label,
+                normalize=normalize,
+                top_k_classes=top_k_classes,
+                progress_label=run_label,
+                print_config=False,
+                print_summary=False,
+            )
+            if summary.get("generated"):
+                generated += 1
+            else:
+                skipped += 1
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            failures.append(
+                {
+                    "checkpoint_path": str(checkpoint_path),
+                    "error": str(exc),
+                }
+            )
+
+    summary = {
+        "runs_root": str(runs_root),
+        "total_runs": total,
+        "generated": generated,
+        "skipped_existing": skipped,
+        "failed": failed,
+        "overwrite_existing": overwrite,
+        "split": split,
+        "val_split": val_split,
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "normalize": normalize,
+        "top_k_classes": top_k_classes,
+        "failures": failures,
+    }
+    print_section("CONFUSION MATRIX BATCH SUMMARY", summary)
+    return summary
+
+
+def main() -> None:
+    if GENERATE_FOR_ALL_RUNS:
+        summary = generate_missing_confusion_matrices_for_runs(
+            runs_root=RUNS_ROOT,
+            checkpoint_filename=RUN_CHECKPOINT_FILENAME,
+            confusion_matrix_filename=RUN_CONFUSION_MATRIX_FILENAME,
+            overwrite=OVERWRITE_EXISTING,
+            split=SPLIT,
+            val_split=VAL_SPLIT,
+            seed=SEED,
+            batch_size=BATCH_SIZE,
+            num_workers=NUM_WORKERS,
+            th_multi_label=TH_MULTI_LABEL,
+            normalize=NORMALIZE,
+            top_k_classes=TOP_K_CLASSES,
+        )
+        if summary["total_runs"] > 0:
+            return
+
+    ensure_confusion_matrix_for_checkpoint(
+        model_path=MODEL_PATH,
+        output_path=OUTPUT_PATH,
+        overwrite=OVERWRITE_EXISTING,
+        split=SPLIT,
+        val_split=VAL_SPLIT,
+        seed=SEED,
+        batch_size=BATCH_SIZE,
+        num_workers=NUM_WORKERS,
+        th_multi_label=TH_MULTI_LABEL,
+        normalize=NORMALIZE,
+        top_k_classes=TOP_K_CLASSES,
+    )
 
 
 if __name__ == "__main__":

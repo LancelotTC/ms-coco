@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import time
+from datetime import datetime, timezone
 from typing import Iterable
 
 import torch
@@ -14,6 +16,7 @@ from config import (
     TRAIN_LABELS_DIR,
 )
 from dataset_readers import COCOTrainImageDataset
+from generate_confusion_matrix import ensure_confusion_matrix_for_checkpoint
 from models_factory import AVAILABLE_MODELS, create_model, freeze_all, unfreeze_last_n_backbone_layers
 from utils import print_section, tokenize_float, train_loop, tune_threshold_on_validation, validation_loop
 
@@ -27,9 +30,9 @@ except ModuleNotFoundError:
     TENSORBOARD_AVAILABLE = False
 
 # Memory-aware batch schedule.
-TRAIN_BATCH_SIZE_FROZEN = 256
+TRAIN_BATCH_SIZE_FROZEN = 64
 TRAIN_BATCH_SIZE_UNFROZEN = 16
-VAL_BATCH_SIZE = 256
+VAL_BATCH_SIZE = 64
 
 # Keep effective batch size high even when unfrozen batch must be small.
 GRAD_ACCUM_STEPS_FROZEN = 1
@@ -38,7 +41,7 @@ GRAD_ACCUM_STEPS_UNFROZEN = 4
 USE_AMP = True
 AMP_DTYPE = torch.float16
 
-NUM_EPOCHS = 25
+NUM_EPOCHS = 20
 # Intentionally run train metrics only once, at the final epoch.
 TRAIN_METRICS_EVERY_N_EPOCHS = NUM_EPOCHS
 VAL_EVERY_N_EPOCHS = 1
@@ -65,14 +68,16 @@ TH_MULTI_LABEL = 0.5
 THRESHOLD_CANDIDATES = tuple(i / 100 for i in range(5, 96, 5))
 MBATCH_LOSS_GROUP = -1
 
-EARLY_STOPPING_ENABLED = False
+EARLY_STOPPING_ENABLED = True
 EARLY_STOPPING_PATIENCE = 4
 EARLY_STOPPING_MIN_DELTA = 0.0
 
-USE_TENSORBOARD = False
+USE_TENSORBOARD = True
 TRAINED_MODELS_ROOT = BEST_MODEL_PATH.parent
 ACTIVE_CHECKPOINT_FILENAME = BEST_MODEL_PATH.name
 MODEL_PATH = TRAINED_MODELS_ROOT / ACTIVE_CHECKPOINT_FILENAME
+RUN_CONFIG_FILENAME = "run_config.json"
+RUN_CONFUSION_MATRIX_FILENAME = "confusion_matrix.png"
 
 
 def should_run_eval(epoch: int, every_n_epochs: int, force_last: bool, total_epochs: int) -> bool:
@@ -111,6 +116,32 @@ def _build_batch_size_token() -> str:
     if FREEZE_BACKBONE_AT_START:
         return str(TRAIN_BATCH_SIZE_FROZEN)
     return str(TRAIN_BATCH_SIZE_UNFROZEN)
+
+
+def _build_run_output_dir(root: Path, model_name: str, started_at: datetime) -> tuple[Path, str]:
+    timestamp = started_at.strftime("%Y%m%d-%H%M%S")
+    base_name = f"{model_name}_{timestamp}"
+    run_dir = root / base_name
+    suffix = 1
+    while run_dir.exists():
+        run_dir = root / f"{base_name}_{suffix:02d}"
+        suffix += 1
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir, run_dir.name
+
+
+def _json_default(value: object):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, torch.dtype):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _write_json(path: Path, data: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, default=_json_default)
 
 
 def _configure_trainable_state(
@@ -209,72 +240,17 @@ def _compute_pos_weight(train_subset, num_classes: int) -> torch.Tensor:
     return pos_weight.to(dtype=torch.float32)
 
 
-def _build_config_model_path(
-    base_path: Path,
-    model_name: str,
-    total_epochs: int,
-    batch_size_token: str,
-    training_plan_token: str,
-    th_multi_label: float,
-    val_split: float,
-    train_metrics_every_n_epochs: int,
-    val_every_n_epochs: int,
-    seed: int,
-    num_workers: int,
-    num_classes: int,
-) -> Path:
-    suffix = base_path.suffix or ".pt"
-    stem = base_path.stem
-    file_name = (
-        f"{stem}_{model_name}"
-        f"_ep-{total_epochs}"
-        f"_bs-{batch_size_token}"
-        f"_tp-{training_plan_token}"
-        f"_th-{tokenize_float(th_multi_label, precision=3)}"
-        f"_vs-{tokenize_float(val_split, precision=3)}"
-        f"_te-{train_metrics_every_n_epochs}"
-        f"_ve-{val_every_n_epochs}"
-        f"_sd-{seed}"
-        f"_nw-{num_workers}"
-        f"_nc-{num_classes}"
-        f"{suffix}"
-    )
-    return base_path.with_name(file_name)
-
-
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    run_started_at = datetime.now(timezone.utc)
     training_plan_token = _build_training_plan_token()
     batch_size_token = _build_batch_size_token()
+    run_output_dir, run_id = _build_run_output_dir(TRAINED_MODELS_ROOT, MODEL_NAME, run_started_at)
+    run_model_path = run_output_dir / ACTIVE_CHECKPOINT_FILENAME
+    run_config_path = run_output_dir / RUN_CONFIG_FILENAME
+    run_confusion_matrix_path = run_output_dir / RUN_CONFUSION_MATRIX_FILENAME
 
-    model_output_dir = MODEL_PATH.parent / MODEL_NAME
-    model_output_dir.mkdir(parents=True, exist_ok=True)
-    config_model_path = _build_config_model_path(
-        model_output_dir / MODEL_PATH.name,
-        MODEL_NAME,
-        NUM_EPOCHS,
-        batch_size_token,
-        training_plan_token,
-        TH_MULTI_LABEL,
-        VAL_SPLIT,
-        TRAIN_METRICS_EVERY_N_EPOCHS,
-        VAL_EVERY_N_EPOCHS,
-        SEED,
-        NUM_WORKERS,
-        NUM_CLASSES,
-    )
-
-    existing_checkpoint = None
-    existing_best_f1 = -1.0
-    if config_model_path.exists():
-        try:
-            existing_checkpoint = torch.load(config_model_path, map_location="cpu")
-            existing_best_f1 = float(existing_checkpoint.get("best_val_f1", -1.0))
-        except Exception:
-            existing_checkpoint = None
-            existing_best_f1 = -1.0
-
-    run_config = {
+    training_config = {
         "model_name": MODEL_NAME,
         "device": device.type,
         "epochs": NUM_EPOCHS,
@@ -309,12 +285,16 @@ def main() -> None:
         "early_stopping_patience": EARLY_STOPPING_PATIENCE,
         "early_stopping_min_delta": EARLY_STOPPING_MIN_DELTA,
         "trained_models_root": TRAINED_MODELS_ROOT,
+        "run_id": run_id,
+        "run_started_at_utc": run_started_at.isoformat(),
+        "run_output_dir": run_output_dir,
+        "run_model_path": run_model_path,
+        "run_config_path": run_config_path,
+        "run_confusion_matrix_path": run_confusion_matrix_path,
         "active_checkpoint_filename": ACTIVE_CHECKPOINT_FILENAME,
         "active_checkpoint_path": MODEL_PATH,
-        "config_checkpoint_path": config_model_path,
-        "existing_config_best_f1": f"{existing_best_f1:.4f}" if existing_best_f1 >= 0 else "none",
     }
-    print_section("TRAINING START CONFIG", run_config)
+    print_section("TRAINING START CONFIG", training_config)
 
     net, transform, head_params = create_model(MODEL_NAME, NUM_CLASSES, pretrained=True)
     if transform is None:
@@ -546,64 +526,163 @@ def main() -> None:
     if summary_writer:
         summary_writer.close()
 
-    selected_checkpoint = existing_checkpoint
-    selected_source = "existing_config_checkpoint"
-    did_overwrite_config_checkpoint = False
-    if run_best_checkpoint is not None and run_best_f1 > existing_best_f1:
-        selected_checkpoint = run_best_checkpoint
-        selected_source = "new_run_best_checkpoint"
-        did_overwrite_config_checkpoint = True
-        torch.save(run_best_checkpoint, config_model_path)
+    if run_best_checkpoint is None:
+        print("No validation results were produced; no checkpoint saved.")
+        return
 
-    if selected_checkpoint is not None:
-        MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(selected_checkpoint, MODEL_PATH)
+    run_best_checkpoint["run_id"] = run_id
+    run_best_checkpoint["run_started_at_utc"] = run_started_at.isoformat()
+    run_best_checkpoint["run_output_dir"] = str(run_output_dir)
 
-        net.load_state_dict(selected_checkpoint["state_dict"])
-        net.eval()
-        selected_threshold = float(
-            selected_checkpoint.get("best_threshold", selected_checkpoint.get("th_multi_label", TH_MULTI_LABEL))
-        )
-        selected_train_results = validation_loop(
-            train_loader,
-            net,
-            criterion,
-            NUM_CLASSES,
-            device,
-            multi_label=True,
+    run_output_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(run_best_checkpoint, run_model_path)
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(run_best_checkpoint, MODEL_PATH)
+
+    net.load_state_dict(run_best_checkpoint["state_dict"])
+    net.eval()
+    selected_threshold = float(
+        run_best_checkpoint.get("best_threshold", run_best_checkpoint.get("th_multi_label", TH_MULTI_LABEL))
+    )
+    selected_train_results = validation_loop(
+        train_loader,
+        net,
+        criterion,
+        NUM_CLASSES,
+        device,
+        multi_label=True,
+        th_multi_label=selected_threshold,
+        one_hot=True,
+        progress_label="    Train Eval",
+        apply_sigmoid=True,
+    )
+    selected_train_f1 = float(selected_train_results["f1"])
+    selected_val_f1 = float(run_best_checkpoint["best_val_f1"])
+
+    confusion_matrix_error = None
+    confusion_matrix_summary = None
+    try:
+        confusion_matrix_summary = ensure_confusion_matrix_for_checkpoint(
+            model_path=run_model_path,
+            output_path=run_confusion_matrix_path,
+            overwrite=False,
+            split="val",
+            val_split=VAL_SPLIT,
+            seed=SEED,
+            batch_size=VAL_BATCH_SIZE,
+            num_workers=NUM_WORKERS,
             th_multi_label=selected_threshold,
-            one_hot=True,
-            progress_label="    Train Eval",
-            apply_sigmoid=True,
+            normalize="rows",
+            top_k_classes=40,
+            progress_label="    Confusion",
+            print_config=False,
+            print_summary=False,
         )
-        selected_train_f1 = float(selected_train_results["f1"])
-        selected_val_f1 = float(selected_checkpoint["best_val_f1"])
+    except Exception as exc:  # noqa: BLE001
+        confusion_matrix_error = str(exc)
 
-        summary_items = {
+    run_finished_at = datetime.now(timezone.utc)
+    run_metadata = {
+        "run": {
+            "run_id": run_id,
             "model_name": MODEL_NAME,
-            "selected_from": selected_source,
-            "config_checkpoint_overwritten": did_overwrite_config_checkpoint,
-            "best_epoch": f"{selected_checkpoint['best_epoch']}of{selected_checkpoint['total_epochs']}",
-            "best_val_f1": f"{selected_val_f1:.4f}",
-            "best_threshold": f"{selected_threshold:.2f}",
-            "selected_train_f1_eval": f"{selected_train_f1:.4f}",
-            "last_train_f1": f"{float(last_train_results['f1']):.4f}" if last_train_results else "skipped",
-            "last_val_f1": f"{float(last_val_results['f1']):.4f}" if last_val_results else "skipped",
-            "run_best_val_f1": f"{run_best_f1:.4f}" if run_best_checkpoint is not None else "none",
-            "existing_config_best_f1": f"{existing_best_f1:.4f}" if existing_best_f1 >= 0 else "none",
+            "started_at_utc": run_started_at.isoformat(),
+            "finished_at_utc": run_finished_at.isoformat(),
+            "duration_seconds": round((run_finished_at - run_started_at).total_seconds(), 3),
+        },
+        "paths": {
+            "run_output_dir": run_output_dir,
+            "run_checkpoint_path": run_model_path,
+            "run_confusion_matrix_path": run_confusion_matrix_path,
+            "active_checkpoint_path": MODEL_PATH,
+        },
+        "configuration": {
+            "num_classes": NUM_CLASSES,
+            "epochs": NUM_EPOCHS,
+            "train_batch_size_frozen": TRAIN_BATCH_SIZE_FROZEN,
+            "train_batch_size_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN,
+            "val_batch_size": VAL_BATCH_SIZE,
+            "grad_accum_steps_frozen": GRAD_ACCUM_STEPS_FROZEN,
+            "grad_accum_steps_unfrozen": GRAD_ACCUM_STEPS_UNFROZEN,
+            "effective_batch_frozen": TRAIN_BATCH_SIZE_FROZEN * GRAD_ACCUM_STEPS_FROZEN,
+            "effective_batch_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN * GRAD_ACCUM_STEPS_UNFROZEN,
+            "use_amp": USE_AMP,
+            "amp_dtype": AMP_DTYPE,
+            "freeze_backbone_at_start": FREEZE_BACKBONE_AT_START,
+            "unfreeze_backbone_epoch": UNFREEZE_BACKBONE_EPOCH if should_unfreeze_later else None,
+            "unfreeze_last_n_backbone_layers": UNFREEZE_LAST_N_BACKBONE_LAYERS,
+            "use_differential_lr": USE_DIFFERENTIAL_LR,
+            "learning_rate": LEARNING_RATE if not USE_DIFFERENTIAL_LR else None,
+            "backbone_base_lr": BACKBONE_BASE_LR if USE_DIFFERENTIAL_LR else None,
+            "head_base_lr": HEAD_BASE_LR if USE_DIFFERENTIAL_LR else None,
+            "lr_milestones": LR_MILESTONES,
+            "lr_decay_factor": LR_DECAY_FACTOR,
+            "val_split": VAL_SPLIT,
+            "seed": SEED,
+            "num_workers": NUM_WORKERS,
+            "th_multi_label_initial": TH_MULTI_LABEL,
+            "threshold_candidates": THRESHOLD_CANDIDATES,
+            "train_metrics_every_n_epochs": TRAIN_METRICS_EVERY_N_EPOCHS,
+            "val_every_n_epochs": VAL_EVERY_N_EPOCHS,
+            "early_stopping_enabled": EARLY_STOPPING_ENABLED,
+            "early_stopping_patience": EARLY_STOPPING_PATIENCE,
+            "early_stopping_min_delta": EARLY_STOPPING_MIN_DELTA,
+            "use_tensorboard": USE_TENSORBOARD and TENSORBOARD_AVAILABLE,
+            "training_plan_token": training_plan_token,
+            "batch_size_token": batch_size_token,
+        },
+        "dataset": {
+            "full_dataset_size": len(full_dataset),
+            "train_size": len(train_set),
+            "val_size": len(val_set),
+            "train_images_dir": TRAIN_IMAGES_DIR,
+            "train_labels_dir": TRAIN_LABELS_DIR,
+        },
+        "results": {
+            "best_epoch": int(run_best_checkpoint["best_epoch"]),
+            "total_epochs": int(run_best_checkpoint["total_epochs"]),
+            "best_val_f1": selected_val_f1,
+            "best_threshold": selected_threshold,
+            "selected_train_f1_eval": selected_train_f1,
+            "last_train_f1": float(last_train_results["f1"]) if last_train_results else None,
+            "last_val_f1": float(last_val_results["f1"]) if last_val_results else None,
             "completed_epochs": completed_epochs,
             "early_stopped": early_stopped,
             "early_stop_reason": early_stop_reason,
-            "active_checkpoint_path": MODEL_PATH,
-            "config_checkpoint_path": config_model_path,
-            "config_summary": (
-                f"epochs={NUM_EPOCHS}, train_bs={TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}, "
-                f"training_plan={training_plan_token}, th_multi_label={TH_MULTI_LABEL}"
+        },
+        "artifacts": {
+            "checkpoint_file": run_model_path.name,
+            "config_file": run_config_path.name,
+            "confusion_matrix_file": run_confusion_matrix_path.name,
+            "confusion_matrix_generated": (
+                bool(confusion_matrix_summary.get("generated")) if confusion_matrix_summary else False
             ),
-        }
-        print_section("TRAINING SUMMARY", summary_items)
-    else:
-        print("No validation results were produced and no prior config checkpoint exists; no checkpoint saved.")
+            "confusion_matrix_exists": run_confusion_matrix_path.exists(),
+            "confusion_matrix_summary": confusion_matrix_summary,
+            "confusion_matrix_error": confusion_matrix_error,
+        },
+    }
+    _write_json(run_config_path, run_metadata)
+
+    summary_items = {
+        "model_name": MODEL_NAME,
+        "run_id": run_id,
+        "run_dir": run_output_dir,
+        "best_epoch": f"{run_best_checkpoint['best_epoch']}of{run_best_checkpoint['total_epochs']}",
+        "best_val_f1": f"{selected_val_f1:.4f}",
+        "best_threshold": f"{selected_threshold:.2f}",
+        "selected_train_f1_eval": f"{selected_train_f1:.4f}",
+        "completed_epochs": completed_epochs,
+        "early_stopped": early_stopped,
+        "early_stop_reason": early_stop_reason,
+        "run_checkpoint_path": run_model_path,
+        "run_config_path": run_config_path,
+        "run_confusion_matrix_path": (
+            run_confusion_matrix_path if confusion_matrix_error is None else f"FAILED ({confusion_matrix_error})"
+        ),
+        "active_checkpoint_path": MODEL_PATH,
+    }
+    print_section("TRAINING SUMMARY", summary_items)
 
 
 if __name__ == "__main__":
