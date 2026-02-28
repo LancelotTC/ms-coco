@@ -25,17 +25,17 @@ from references import (
 from utils import ProgressBar, print_section, tokenize_float
 
 
-BATCH_SIZE = 32
-NUM_WORKERS = 0
-TH_MULTI_LABEL = 0.5
+# Test data loading and inference threshold.
+BATCH_SIZE: int = 32
+NUM_WORKERS: int = 0
+TH_MULTI_LABEL: float = 0.5
 
-MODEL_PATH = BEST_MODEL_PATH
+MODEL_PATH: Path = BEST_MODEL_PATH
+
+OUTPUT_PATH: Path = Path("predictions.json")
 
 
-OUTPUT_PATH = Path("predictions.json")
-
-
-def _build_predictions_path(
+def build_predictions_path(
     base_path: Path,
     model_name: str,
     estimated_f1: float | None,
@@ -136,7 +136,7 @@ def main() -> None:
     if progress_bar:
         progress_bar.finish()
 
-    output_path = _build_predictions_path(
+    output_path = build_predictions_path(
         OUTPUT_PATH,
         model_name=model_name,
         estimated_f1=float(estimated_f1) if estimated_f1 is not None else None,

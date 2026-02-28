@@ -43,6 +43,8 @@ from references import (
 )
 from utils import print_section, tokenize_float, train_loop, tune_threshold_on_validation, validation_loop
 
+TENSORBOARD_AVAILABLE: bool
+
 try:
     from torch.utils.tensorboard import SummaryWriter
 
@@ -52,56 +54,58 @@ try:
 except ModuleNotFoundError:
     TENSORBOARD_AVAILABLE = False
 
-# Memory-aware batch schedule.
-TRAIN_BATCH_SIZE_FROZEN = 32
-TRAIN_BATCH_SIZE_UNFROZEN = 16
-VAL_BATCH_SIZE = 32
+# Batch sizing.
+TRAIN_BATCH_SIZE_FROZEN: int = 32
+TRAIN_BATCH_SIZE_UNFROZEN: int = 16
+VAL_BATCH_SIZE: int = 32
 
 # Keep effective batch size high even when unfrozen batch must be small.
-GRAD_ACCUM_STEPS_FROZEN = 1
-GRAD_ACCUM_STEPS_UNFROZEN = 1
+GRAD_ACCUM_STEPS_FROZEN: int = 1
+GRAD_ACCUM_STEPS_UNFROZEN: int = 1
 
-USE_AMP = True
-AMP_DTYPE = torch.float16
+USE_AMP: bool = True
+AMP_DTYPE: torch.dtype = torch.float16
 
-NUM_EPOCHS = 14
+NUM_EPOCHS: int = 14
 
-TRAIN_METRICS_EVERY_N_EPOCHS = 2
-VAL_EVERY_N_EPOCHS = 1
+TRAIN_METRICS_EVERY_N_EPOCHS: int = 2
+VAL_EVERY_N_EPOCHS: int = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
-FREEZE_BACKBONE_AT_START = FREEZE_BACKBONE
-UNFREEZE_BACKBONE_EPOCH = 1  # 1-based epoch index; ignored when not freezing at start.
+FREEZE_BACKBONE_AT_START: bool = FREEZE_BACKBONE
+UNFREEZE_BACKBONE_EPOCH: int = 1  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
-UNFREEZE_LAST_N_BACKBONE_LAYERS = None
+UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = None
 
-LEARNING_RATE = 1e-2  # Base LR, unused if USE_DIFFERENTIAL_LR == True
+# Base LR used only when `USE_DIFFERENTIAL_LR` is disabled.
+LEARNING_RATE: float = 1e-2
 
 # LR schedule (independent from freeze/unfreeze schedule).
-USE_DIFFERENTIAL_LR = True
-BACKBONE_BASE_LR = 1e-5
-HEAD_BASE_LR = 1e-4
-LR_MILESTONES = (max(1, NUM_EPOCHS // 2),)
-LR_DECAY_FACTOR = 1e-2
+USE_DIFFERENTIAL_LR: bool = True
+BACKBONE_BASE_LR: float = 1e-5
+HEAD_BASE_LR: float = 1e-4
+LR_MILESTONES: tuple[int, ...] = (max(1, NUM_EPOCHS // 2),)
+LR_DECAY_FACTOR: float = 1e-2
 
-VAL_SPLIT = 0.05
-SEED = 42
-NUM_WORKERS = 4
+VAL_SPLIT: float = 0.05
+SEED: int = 42
+NUM_WORKERS: int = 4
 
-TH_MULTI_LABEL = 0.5
-THRESHOLD_CANDIDATES = tuple(i / 100 for i in range(5, 96, 5))
-MBATCH_LOSS_GROUP = -1
+# Default threshold for multi-label prediction probabilities.
+TH_MULTI_LABEL: float = 0.5
+THRESHOLD_CANDIDATES: tuple[float, ...] = tuple(i / 100 for i in range(5, 96, 5))
+MBATCH_LOSS_GROUP: int = -1
 
-EARLY_STOPPING_ENABLED = True
-EARLY_STOPPING_PATIENCE = 4
-EARLY_STOPPING_MIN_DELTA = 0.0
+EARLY_STOPPING_ENABLED: bool = True
+EARLY_STOPPING_PATIENCE: int = 4
+EARLY_STOPPING_MIN_DELTA: float = 0.0
 
-USE_TENSORBOARD = True
-TRAINED_MODELS_ROOT = BEST_MODEL_PATH.parent
-ACTIVE_CHECKPOINT_FILENAME = BEST_MODEL_PATH.name
-MODEL_PATH = TRAINED_MODELS_ROOT / ACTIVE_CHECKPOINT_FILENAME
-RUN_CONFIG_FILENAME = "run_config.json"
-RUN_CONFUSION_MATRIX_FILENAME = "confusion_matrix.png"
+USE_TENSORBOARD: bool = True
+TRAINED_MODELS_ROOT: Path = BEST_MODEL_PATH.parent
+ACTIVE_CHECKPOINT_FILENAME: str = BEST_MODEL_PATH.name
+MODEL_PATH: Path = TRAINED_MODELS_ROOT / ACTIVE_CHECKPOINT_FILENAME
+RUN_CONFIG_FILENAME: str = "run_config.json"
+RUN_CONFUSION_MATRIX_FILENAME: str = "confusion_matrix.png"
 
 
 def should_run_eval(epoch: int, every_n_epochs: int, force_last: bool, total_epochs: int) -> bool:
@@ -110,7 +114,7 @@ def should_run_eval(epoch: int, every_n_epochs: int, force_last: bool, total_epo
     return force_last and epoch == total_epochs - 1
 
 
-def _build_training_plan_token() -> str:
+def build_training_plan_token() -> str:
     milestones_token = "-".join(str(milestone) for milestone in LR_MILESTONES) if LR_MILESTONES else "none"
     unfreeze_token = (
         str(UNFREEZE_BACKBONE_EPOCH)
@@ -133,7 +137,7 @@ def _build_training_plan_token() -> str:
     )
 
 
-def _build_batch_size_token() -> str:
+def build_batch_size_token() -> str:
     has_unfreeze = FREEZE_BACKBONE_AT_START and 1 <= UNFREEZE_BACKBONE_EPOCH <= NUM_EPOCHS
     if has_unfreeze:
         return f"{TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}"
@@ -142,7 +146,7 @@ def _build_batch_size_token() -> str:
     return str(TRAIN_BATCH_SIZE_UNFROZEN)
 
 
-def _build_run_output_dir(root: Path, model_name: str, started_at: datetime) -> tuple[Path, str]:
+def build_run_output_dir(root: Path, model_name: str, started_at: datetime) -> tuple[Path, str]:
     timestamp = started_at.strftime("%Y%m%d-%H%M%S")
     base_name = f"{model_name}_{timestamp}"
     run_dir = root / base_name
@@ -154,7 +158,7 @@ def _build_run_output_dir(root: Path, model_name: str, started_at: datetime) -> 
     return run_dir, run_dir.name
 
 
-def _json_default(value: object):
+def json_default(value: object):
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, torch.dtype):
@@ -162,13 +166,13 @@ def _json_default(value: object):
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
-def _write_json(path: Path, data: dict[str, object]) -> None:
+def write_json(path: Path, data: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, default=_json_default)
+        json.dump(data, file, indent=2, default=json_default)
 
 
-def _configure_trainable_state(
+def configure_trainable_state(
     net: torch.nn.Module,
     head_params: list[torch.nn.Parameter],
     freeze_backbone_now: bool,
@@ -198,7 +202,7 @@ def _configure_trainable_state(
     return mode_text, unfrozen_layer_names
 
 
-def _build_optimizer(
+def build_optimizer(
     net: torch.nn.Module,
     head_params: list[torch.nn.Parameter],
 ) -> torch.optim.Optimizer:
@@ -214,7 +218,7 @@ def _build_optimizer(
     return torch.optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
 
-def _build_scheduler(optimizer: torch.optim.Optimizer) -> torch.optim.lr_scheduler.MultiStepLR | None:
+def build_scheduler(optimizer: torch.optim.Optimizer) -> torch.optim.lr_scheduler.MultiStepLR | None:
     if not LR_MILESTONES:
         return None
     return torch.optim.lr_scheduler.MultiStepLR(
@@ -224,7 +228,7 @@ def _build_scheduler(optimizer: torch.optim.Optimizer) -> torch.optim.lr_schedul
     )
 
 
-def _build_loader(
+def build_loader(
     dataset: torch.utils.data.Dataset,
     *,
     batch_size: int,
@@ -240,17 +244,17 @@ def _build_loader(
     )
 
 
-def _iter_subset_label_paths(train_subset) -> Iterable[Path]:
+def iter_subset_label_paths(train_subset) -> Iterable[Path]:
     dataset = train_subset.dataset
     annotations_dir = Path(dataset.annotations_dir)
     for idx in train_subset.indices:
         yield annotations_dir / dataset.img_labels[idx]
 
 
-def _compute_pos_weight(train_subset, num_classes: int) -> torch.Tensor:
+def compute_pos_weight(train_subset, num_classes: int) -> torch.Tensor:
     class_positives = torch.zeros(num_classes, dtype=torch.float64)
     num_samples = len(train_subset)
-    for label_path in _iter_subset_label_paths(train_subset):
+    for label_path in iter_subset_label_paths(train_subset):
         with label_path.open("r", encoding="utf-8") as file:
             for line in file:
                 stripped = line.strip()
@@ -267,9 +271,9 @@ def _compute_pos_weight(train_subset, num_classes: int) -> torch.Tensor:
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_started_at = datetime.now(timezone.utc)
-    training_plan_token = _build_training_plan_token()
-    batch_size_token = _build_batch_size_token()
-    run_output_dir, run_id = _build_run_output_dir(TRAINED_MODELS_ROOT, MODEL_NAME, run_started_at)
+    training_plan_token = build_training_plan_token()
+    batch_size_token = build_batch_size_token()
+    run_output_dir, run_id = build_run_output_dir(TRAINED_MODELS_ROOT, MODEL_NAME, run_started_at)
     run_model_path = run_output_dir / ACTIVE_CHECKPOINT_FILENAME
     run_config_path = run_output_dir / RUN_CONFIG_FILENAME
     run_confusion_matrix_path = run_output_dir / RUN_CONFUSION_MATRIX_FILENAME
@@ -336,12 +340,12 @@ def main() -> None:
 
     train_batch_size_now = TRAIN_BATCH_SIZE_FROZEN if FREEZE_BACKBONE_AT_START else TRAIN_BATCH_SIZE_UNFROZEN
     grad_accum_steps_now = GRAD_ACCUM_STEPS_FROZEN if FREEZE_BACKBONE_AT_START else GRAD_ACCUM_STEPS_UNFROZEN
-    train_loader = _build_loader(train_set, batch_size=train_batch_size_now, shuffle=True)
-    val_loader = _build_loader(val_set, batch_size=VAL_BATCH_SIZE, shuffle=False)
+    train_loader = build_loader(train_set, batch_size=train_batch_size_now, shuffle=True)
+    val_loader = build_loader(val_set, batch_size=VAL_BATCH_SIZE, shuffle=False)
 
     net = net.to(device)
     head_params_list = list(head_params)
-    current_mode_text, active_backbone_layers = _configure_trainable_state(
+    current_mode_text, active_backbone_layers = configure_trainable_state(
         net, head_params_list, FREEZE_BACKBONE_AT_START
     )
     print(f"Training mode at start: {current_mode_text}")
@@ -355,11 +359,11 @@ def main() -> None:
         target_layers = UNFREEZE_LAST_N_BACKBONE_LAYERS if UNFREEZE_LAST_N_BACKBONE_LAYERS is not None else "all"
         print(f"Backbone unfreeze scheduled at epoch {UNFREEZE_BACKBONE_EPOCH} (layers={target_layers}).")
 
-    optimizer = _build_optimizer(net, head_params_list)
-    scheduler = _build_scheduler(optimizer)
+    optimizer = build_optimizer(net, head_params_list)
+    scheduler = build_scheduler(optimizer)
     scaler = torch.amp.GradScaler("cuda") if USE_AMP and device.type == "cuda" else None
 
-    pos_weight = _compute_pos_weight(train_set, NUM_CLASSES).to(device)
+    pos_weight = compute_pos_weight(train_set, NUM_CLASSES).to(device)
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     run_best_f1 = -1.0
@@ -385,11 +389,11 @@ def main() -> None:
         print(f"\nEpoch {epoch_index}:")
 
         if should_unfreeze_later and not backbone_is_unfrozen and epoch_index >= UNFREEZE_BACKBONE_EPOCH:
-            current_mode_text, active_backbone_layers = _configure_trainable_state(net, head_params_list, False)
+            current_mode_text, active_backbone_layers = configure_trainable_state(net, head_params_list, False)
             backbone_is_unfrozen = True
             train_batch_size_now = TRAIN_BATCH_SIZE_UNFROZEN
             grad_accum_steps_now = GRAD_ACCUM_STEPS_UNFROZEN
-            train_loader = _build_loader(train_set, batch_size=train_batch_size_now, shuffle=True)
+            train_loader = build_loader(train_set, batch_size=train_batch_size_now, shuffle=True)
             print(
                 f"Backbone unfrozen at epoch {epoch_index}. Mode: {current_mode_text} | "
                 f"train_batch_size={train_batch_size_now}, grad_accum_steps={grad_accum_steps_now}"
@@ -721,7 +725,7 @@ def main() -> None:
             "confusion_matrix_error": confusion_matrix_error,
         },
     }
-    _write_json(run_config_path, run_metadata)
+    write_json(run_config_path, run_metadata)
 
     summary_items = {
         "model_name": MODEL_NAME,

@@ -1,32 +1,29 @@
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-LOCAL_FOLDER = Path.home() / "ms-coco"
+PROJECT_ROOT: Path = Path(__file__).resolve().parent
+LOCAL_FOLDER: Path = Path.home() / "ms-coco"
 
-DATASET_FOLDER = LOCAL_FOLDER / "ms-coco-dataset"
-PRETRAINED_MODELS_FOLDER = LOCAL_FOLDER / "pre-trained_models"
-TRAINED_MODELS_FOLDER = PROJECT_ROOT / "trained_models"
+DATASET_FOLDER: Path = LOCAL_FOLDER / "ms-coco-dataset"
+PRETRAINED_MODELS_FOLDER: Path = LOCAL_FOLDER / "pre-trained_models"
+TRAINED_MODELS_FOLDER: Path = PROJECT_ROOT / "trained_models"
 
-IMAGES_DIR = DATASET_FOLDER / "images"
-LABELS_DIR = DATASET_FOLDER / "labels"
+IMAGES_DIR: Path = DATASET_FOLDER / "images"
+LABELS_DIR: Path = DATASET_FOLDER / "labels"
 
-TRAIN_IMAGES_DIR = IMAGES_DIR / "train-resized"
-TEST_IMAGES_DIR = IMAGES_DIR / "test-resized"
-TRAIN_LABELS_DIR = LABELS_DIR / "train"
+TRAIN_IMAGES_DIR: Path = IMAGES_DIR / "train-resized"
+TEST_IMAGES_DIR: Path = IMAGES_DIR / "test-resized"
+TRAIN_LABELS_DIR: Path = LABELS_DIR / "train"
 
+NUM_CLASSES: int = 80
 
-NUM_CLASSES = 80
+# Keep tested model names nearby; last one is active.
+MODEL_CHOICES: tuple[str, ...] = ("vit_b_16", "swin_v2_t", "convnext_tiny", "regnet_y_800mf")
+MODEL_NAME: str = MODEL_CHOICES[-1]
 
-# All tested models retained for ease of use. Only last is considered.
-MODEL_NAME = "vit_b_16"
-MODEL_NAME = "swin_v2_t"
-MODEL_NAME = "convnext_tiny"
-MODEL_NAME = "regnet_y_800mf"
+BEST_MODEL_PATH: Path = TRAINED_MODELS_FOLDER / "best_model.pt"
+FREEZE_BACKBONE: bool = True
 
-BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
-FREEZE_BACKBONE = True
-
-CLASSES = (
+CLASSES: tuple[str, ...] = (
     "person",
     "bicycle",
     "car",
