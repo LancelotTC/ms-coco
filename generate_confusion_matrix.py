@@ -373,6 +373,7 @@ def generate_missing_confusion_matrices_for_runs(
     skipped = 0
     failed = 0
     failures: list[dict[str, str]] = []
+    runs: list[dict[str, object]] = []
 
     for index, checkpoint_path in enumerate(checkpoint_paths, start=1):
         output_path = checkpoint_path.parent / confusion_matrix_filename
@@ -398,12 +399,33 @@ def generate_missing_confusion_matrices_for_runs(
                 generated += 1
             else:
                 skipped += 1
+            runs.append(
+                {
+                    "checkpoint_path": str(checkpoint_path),
+                    "output_path": str(output_path),
+                    "model_name": summary.get("model_name"),
+                    "generated": bool(summary.get("generated")),
+                    "skipped_existing": bool(summary.get("skipped_existing")),
+                    "error": None,
+                }
+            )
         except Exception as exc:  # noqa: BLE001
             failed += 1
+            run_error = str(exc)
+            runs.append(
+                {
+                    "checkpoint_path": str(checkpoint_path),
+                    "output_path": str(output_path),
+                    "model_name": None,
+                    "generated": False,
+                    "skipped_existing": False,
+                    "error": run_error,
+                }
+            )
             failures.append(
                 {
                     "checkpoint_path": str(checkpoint_path),
-                    "error": str(exc),
+                    "error": run_error,
                 }
             )
 
@@ -421,6 +443,7 @@ def generate_missing_confusion_matrices_for_runs(
         "normalize": normalize,
         "top_k_classes": top_k_classes,
         "failures": failures,
+        "runs": runs,
     }
     print_section("CONFUSION MATRIX BATCH SUMMARY", summary)
     return summary

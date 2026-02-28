@@ -16,7 +16,7 @@ from config import (
     TRAIN_LABELS_DIR,
 )
 from dataset_readers import COCOTrainImageDataset
-from generate_confusion_matrix import ensure_confusion_matrix_for_checkpoint
+from generate_confusion_matrix import generate_missing_confusion_matrices_for_runs
 from metadata_utils import checkpoint_inference_threshold
 from models_factory import AVAILABLE_MODELS, create_model, freeze_all, unfreeze_last_n_backbone_layers
 from references import (
@@ -634,25 +634,42 @@ def main() -> None:
     selected_train_f1 = float(selected_train_results[METRIC_F1])
     selected_val_f1 = float(run_best_checkpoint[CKPT_BEST_VAL_F1])
 
+    run_confusion_matrix_existed_before = run_confusion_matrix_path.exists()
     confusion_matrix_error = None
     confusion_matrix_summary = None
+    confusion_matrix_batch_summary = None
     try:
-        confusion_matrix_summary = ensure_confusion_matrix_for_checkpoint(
-            model_path=run_model_path,
-            output_path=run_confusion_matrix_path,
+        confusion_matrix_batch_summary = generate_missing_confusion_matrices_for_runs(
+            runs_root=TRAINED_MODELS_ROOT,
+            checkpoint_filename=ACTIVE_CHECKPOINT_FILENAME,
+            confusion_matrix_filename=RUN_CONFUSION_MATRIX_FILENAME,
             overwrite=False,
             split="val",
             val_split=VAL_SPLIT,
             seed=SEED,
             batch_size=VAL_BATCH_SIZE,
             num_workers=NUM_WORKERS,
-            th_multi_label=selected_threshold,
+            th_multi_label=None,
             normalize="rows",
             top_k_classes=40,
-            progress_label="    Confusion",
-            print_config=False,
-            print_summary=False,
         )
+        run_entry = None
+        for item in confusion_matrix_batch_summary.get("runs", []):
+            if item.get("checkpoint_path") == str(run_model_path):
+                run_entry = item
+                break
+
+        if run_entry is not None:
+            confusion_matrix_summary = run_entry
+        else:
+            confusion_matrix_summary = {
+                "checkpoint_path": str(run_model_path),
+                "output_path": str(run_confusion_matrix_path),
+                "model_name": MODEL_NAME,
+                "generated": run_confusion_matrix_path.exists() and not run_confusion_matrix_existed_before,
+                "skipped_existing": run_confusion_matrix_existed_before,
+                "error": None,
+            }
     except Exception as exc:  # noqa: BLE001
         confusion_matrix_error = str(exc)
 
@@ -743,6 +760,7 @@ def main() -> None:
                 bool(confusion_matrix_summary.get("generated")) if confusion_matrix_summary else False
             ),
             "confusion_matrix_exists": run_confusion_matrix_path.exists(),
+            "confusion_matrix_batch_summary": confusion_matrix_batch_summary,
             "confusion_matrix_summary": confusion_matrix_summary,
             "confusion_matrix_error": confusion_matrix_error,
             "tensorboard_log_dir": tensorboard_log_dir,
