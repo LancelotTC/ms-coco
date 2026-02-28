@@ -24,8 +24,6 @@ MODEL_NAME = "convnext_tiny"
 
 BEST_MODEL_PATH = TRAINED_MODELS_FOLDER / "best_model.pt"
 FREEZE_BACKBONE = True
-TRAIN_METRICS_EVERY_N_EPOCHS = 0
-VAL_EVERY_N_EPOCHS = 1
 
 CLASSES = (
     "person",

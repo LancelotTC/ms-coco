@@ -455,6 +455,10 @@ def main() -> None:
                     "model_name": MODEL_NAME,
                     "state_dict": net.state_dict(),
                     "best_val_f1": run_best_f1,
+                    "best_val_loss": float(val_results["loss"]),
+                    "best_val_accuracy": float(val_results["accuracy"]),
+                    "best_val_precision": float(val_results["precision"]),
+                    "best_val_recall": float(val_results["recall"]),
                     "best_epoch": run_best_epoch,
                     "total_epochs": NUM_EPOCHS,
                     "best_threshold": run_best_threshold,
@@ -582,13 +586,19 @@ def main() -> None:
         confusion_matrix_error = str(exc)
 
     run_finished_at = datetime.now(timezone.utc)
+    run_duration_seconds = round((run_finished_at - run_started_at).total_seconds(), 3)
+    run_best_checkpoint["run_finished_at_utc"] = run_finished_at.isoformat()
+    run_best_checkpoint["run_duration_seconds"] = run_duration_seconds
+    torch.save(run_best_checkpoint, run_model_path)
+    torch.save(run_best_checkpoint, MODEL_PATH)
+
     run_metadata = {
         "run": {
             "run_id": run_id,
             "model_name": MODEL_NAME,
             "started_at_utc": run_started_at.isoformat(),
             "finished_at_utc": run_finished_at.isoformat(),
-            "duration_seconds": round((run_finished_at - run_started_at).total_seconds(), 3),
+            "duration_seconds": run_duration_seconds,
         },
         "paths": {
             "run_output_dir": run_output_dir,
@@ -642,6 +652,10 @@ def main() -> None:
             "best_epoch": int(run_best_checkpoint["best_epoch"]),
             "total_epochs": int(run_best_checkpoint["total_epochs"]),
             "best_val_f1": selected_val_f1,
+            "best_val_loss": float(run_best_checkpoint.get("best_val_loss", 0.0)),
+            "best_val_accuracy": float(run_best_checkpoint.get("best_val_accuracy", 0.0)),
+            "best_val_precision": float(run_best_checkpoint.get("best_val_precision", 0.0)),
+            "best_val_recall": float(run_best_checkpoint.get("best_val_recall", 0.0)),
             "best_threshold": selected_threshold,
             "selected_train_f1_eval": selected_train_f1,
             "last_train_f1": float(last_train_results["f1"]) if last_train_results else None,

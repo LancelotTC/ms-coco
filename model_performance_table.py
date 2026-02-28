@@ -22,9 +22,6 @@ GROUP_BY_COLUMNS: list[str] = []  # Example: ["run.model_name"] or ["configurati
 GROUP_MODE = "best"  # Options: "best", "mean"
 OUTPUT_CSV_NAME = "model_performance_table.csv"
 
-# Keep the report F1-centric. Any metric column containing these keywords is dropped.
-DROP_METRIC_KEYWORDS = ("precision", "recall", "accuracy", "loss")
-
 
 def _flatten_dict(data: dict[str, object], prefix: str = "") -> dict[str, object]:
     flat: dict[str, object] = {}
@@ -107,17 +104,6 @@ def _group_dataframe(df: pd.DataFrame, *, sort_by: str | None = None) -> pd.Data
     raise ValueError(f"Unsupported GROUP_MODE='{GROUP_MODE}'. Use 'best' or 'mean'.")
 
 
-def _drop_unused_metric_columns(df: pd.DataFrame) -> pd.DataFrame:
-    cols_to_drop: list[str] = []
-    for col in df.columns:
-        lowered = col.lower()
-        if "f1" in lowered:
-            continue
-        if any(keyword in lowered for keyword in DROP_METRIC_KEYWORDS):
-            cols_to_drop.append(col)
-    return df.drop(columns=cols_to_drop, errors="ignore")
-
-
 def _normalize_epoch_columns(df: pd.DataFrame) -> pd.DataFrame:
     # Backward compatibility: older checkpoints may only have num_epochs.
     if "results.total_epochs" not in df.columns and "results.num_epochs" in df.columns:
@@ -129,6 +115,26 @@ def _normalize_epoch_columns(df: pd.DataFrame) -> pd.DataFrame:
         df["total_epochs"] = df["num_epochs"]
     if "num_epochs" in df.columns:
         df = df.drop(columns=["num_epochs"])
+    return df
+
+
+def _normalize_metric_columns(df: pd.DataFrame) -> pd.DataFrame:
+    mappings = {
+        "run.duration_seconds": ("run.duration_seconds", "run_duration_seconds"),
+        "results.best_val_loss": ("results.best_val_loss", "best_val_loss"),
+        "results.best_val_accuracy": ("results.best_val_accuracy", "best_val_accuracy"),
+        "results.best_val_precision": ("results.best_val_precision", "best_val_precision"),
+        "results.best_val_recall": ("results.best_val_recall", "best_val_recall"),
+        "results.best_val_f1": ("results.best_val_f1", "best_val_f1", "configuration.best_val_f1"),
+    }
+    for target, candidates in mappings.items():
+        if target not in df.columns:
+            for candidate in candidates:
+                if candidate in df.columns:
+                    df[target] = df[candidate]
+                    break
+        if target not in df.columns:
+            df[target] = pd.NA
     return df
 
 
@@ -171,8 +177,8 @@ def main() -> None:
         )
 
     df = pd.DataFrame(rows)
-    df = _drop_unused_metric_columns(df)
     df = _normalize_epoch_columns(df)
+    df = _normalize_metric_columns(df)
     sort_column = _resolve_sort_column(df)
     if sort_column is None:
         print(f"Sort column '{SORT_BY}' not found. Grouping/ordering will be unsorted.")
