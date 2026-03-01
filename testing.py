@@ -11,14 +11,16 @@ from metadata_utils import (
     checkpoint_inference_threshold,
     checkpoint_model_name,
     checkpoint_total_epochs,
+    epoch_token,
 )
 from models_factory import AVAILABLE_MODELS, create_model
 from references import (
     CKPT_BATCH_SIZE,
     CKPT_BEST_EPOCH,
+    CKPT_BEST_THRESHOLD,
     CKPT_BEST_VAL_F1,
     CKPT_LEARNING_RATE,
-    CKPT_MODEL_NAME,
+    CKPT_LEARNING_RATES,
     CKPT_STATE_DICT,
     CKPT_THRESHOLD,
 )
@@ -44,25 +46,26 @@ def build_predictions_path(
     train_batch_size: int | None,
     train_learning_rate: float | None,
     train_th_multi_label: float | None,
+    train_best_threshold: float | None,
     test_batch_size: int,
     test_th_multi_label: float,
 ) -> Path:
     suffix = base_path.suffix or ".json"
     stem = base_path.stem
     f1_token = tokenize_float(estimated_f1) if estimated_f1 is not None else "na"
-    from metadata_utils import epoch_token as build_epoch_token
-
-    epoch_token = build_epoch_token(best_epoch, total_epochs)
+    epoch_value = epoch_token(best_epoch, total_epochs)
     train_bs_token = str(train_batch_size) if train_batch_size is not None else "na"
     train_lr_token = tokenize_float(train_learning_rate, precision=6) if train_learning_rate is not None else "na"
     train_th_token = tokenize_float(train_th_multi_label, precision=3) if train_th_multi_label is not None else "na"
+    best_th_token = tokenize_float(train_best_threshold, precision=3) if train_best_threshold is not None else "na"
     file_name = (
         f"{stem}_{model_name}"
         f"_f1-{f1_token}"
-        f"_ep-{epoch_token}"
+        f"_ep-{epoch_value}"
         f"_bs-{train_bs_token}"
         f"_lr-{train_lr_token}"
         f"_th-{train_th_token}"
+        f"_bth-{best_th_token}"
         f"_testbs-{test_batch_size}"
         f"_testth-{tokenize_float(test_th_multi_label, precision=3)}"
         f"{suffix}"
@@ -80,7 +83,9 @@ def main() -> None:
     total_epochs = checkpoint_total_epochs(checkpoint)
     train_batch_size = checkpoint.get(CKPT_BATCH_SIZE)
     train_learning_rate = checkpoint.get(CKPT_LEARNING_RATE)
+    train_learning_rates = checkpoint.get(CKPT_LEARNING_RATES)
     train_th_multi_label = checkpoint.get(CKPT_THRESHOLD)
+    train_best_threshold = checkpoint.get(CKPT_BEST_THRESHOLD)
     inference_threshold = checkpoint_inference_threshold(checkpoint, TH_MULTI_LABEL)
     if model_name not in AVAILABLE_MODELS:
         raise ValueError(f"Model '{model_name}' not supported. Available: {', '.join(AVAILABLE_MODELS)}")
@@ -94,7 +99,9 @@ def main() -> None:
         "total_epochs(from_ckpt)": total_epochs if total_epochs is not None else "n/a",
         "train_batch_size(from_ckpt)": train_batch_size if train_batch_size is not None else "n/a",
         "train_learning_rate(from_ckpt)": train_learning_rate if train_learning_rate is not None else "n/a",
+        "train_learning_rates(from_ckpt)": train_learning_rates if train_learning_rates is not None else "n/a",
         "train_th_multi_label(from_ckpt)": train_th_multi_label if train_th_multi_label is not None else "n/a",
+        "train_best_threshold(from_ckpt)": train_best_threshold if train_best_threshold is not None else "n/a",
         "test_batch_size": BATCH_SIZE,
         "test_th_multi_label": inference_threshold,
         "test_num_workers": NUM_WORKERS,
@@ -145,6 +152,7 @@ def main() -> None:
         train_batch_size=int(train_batch_size) if train_batch_size is not None else None,
         train_learning_rate=float(train_learning_rate) if train_learning_rate is not None else None,
         train_th_multi_label=float(train_th_multi_label) if train_th_multi_label is not None else None,
+        train_best_threshold=float(train_best_threshold) if train_best_threshold is not None else None,
         test_batch_size=BATCH_SIZE,
         test_th_multi_label=inference_threshold,
     )

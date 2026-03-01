@@ -80,7 +80,7 @@ VAL_EVERY_N_EPOCHS: int = 1
 FREEZE_BACKBONE_AT_START: bool = FREEZE_BACKBONE
 UNFREEZE_BACKBONE_EPOCH: int = 5  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
-UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = 5
+UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = None
 
 # Base LR used only when `USE_DIFFERENTIAL_LR` is disabled.
 LEARNING_RATE: float = 1e-2
@@ -89,12 +89,12 @@ LEARNING_RATE: float = 1e-2
 USE_DIFFERENTIAL_LR: bool = True
 BACKBONE_BASE_LR: float = 1e-5
 HEAD_BASE_LR: float = 1e-4
-LR_MILESTONES: tuple[int, ...] = (max(1, NUM_EPOCHS // 2),)
+LR_MILESTONES: tuple[int, ...] = (5, 10)
 LR_DECAY_FACTOR: float = 1e-2
 
 VAL_SPLIT: float = 0.05
 SEED: int = 42
-NUM_WORKERS: int = 11
+NUM_WORKERS: int = 10
 
 # Default threshold for multi-label prediction probabilities.
 TH_MULTI_LABEL: float = 0.5
