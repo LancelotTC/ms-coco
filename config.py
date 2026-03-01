@@ -19,8 +19,8 @@ NUM_CLASSES: int = 80
 # Keep tested model names nearby; last one is active.
 MODEL_NAME = "vit_b_16"
 MODEL_NAME = "convnext_tiny"
-MODEL_NAME = "regnet_y_800mf"
 MODEL_NAME = "swin_v2_t"
+MODEL_NAME = "regnet_y_800mf"
 MODEL_NAME = "mobilenet_v3_large"
 
 BEST_MODEL_PATH: Path = TRAINED_MODELS_FOLDER / "best_model.pt"

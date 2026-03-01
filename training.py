@@ -80,7 +80,7 @@ VAL_EVERY_N_EPOCHS: int = 1
 FREEZE_BACKBONE_AT_START: bool = FREEZE_BACKBONE
 UNFREEZE_BACKBONE_EPOCH: int = 5  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
-UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = 3
+UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = 5
 
 # Base LR used only when `USE_DIFFERENTIAL_LR` is disabled.
 LEARNING_RATE: float = 1e-2
