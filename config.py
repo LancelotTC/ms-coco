@@ -17,8 +17,11 @@ TRAIN_LABELS_DIR: Path = LABELS_DIR / "train"
 NUM_CLASSES: int = 80
 
 # Keep tested model names nearby; last one is active.
-MODEL_CHOICES: tuple[str, ...] = ("vit_b_16", "swin_v2_t", "convnext_tiny", "regnet_y_800mf")
-MODEL_NAME: str = MODEL_CHOICES[-1]
+MODEL_NAME = "vit_b_16"
+MODEL_NAME = "convnext_tiny"
+MODEL_NAME = "regnet_y_800mf"
+MODEL_NAME = "swin_v2_t"
+MODEL_NAME = "mobilenet_v3_large"
 
 BEST_MODEL_PATH: Path = TRAINED_MODELS_FOLDER / "best_model.pt"
 FREEZE_BACKBONE: bool = True

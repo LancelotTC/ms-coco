@@ -48,7 +48,12 @@ TENSORBOARD_AVAILABLE: bool
 try:
     from torch.utils.tensorboard import SummaryWriter
 
-    from tensorboard_logging import update_graphs
+    from tensorboard_logging import (
+        configure_custom_scalar_layout,
+        log_hparams_summary,
+        log_run_configuration,
+        update_graphs,
+    )
 
     TENSORBOARD_AVAILABLE = True
 except ModuleNotFoundError:
@@ -66,7 +71,7 @@ GRAD_ACCUM_STEPS_UNFROZEN: int = 1
 USE_AMP: bool = True
 AMP_DTYPE: torch.dtype = torch.float16
 
-NUM_EPOCHS: int = 14
+NUM_EPOCHS: int = 2
 
 TRAIN_METRICS_EVERY_N_EPOCHS: int = 1
 VAL_EVERY_N_EPOCHS: int = 1
@@ -75,7 +80,7 @@ VAL_EVERY_N_EPOCHS: int = 1
 FREEZE_BACKBONE_AT_START: bool = FREEZE_BACKBONE
 UNFREEZE_BACKBONE_EPOCH: int = 5  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
-UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = 3
+UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = None
 
 # Base LR used only when `USE_DIFFERENTIAL_LR` is disabled.
 LEARNING_RATE: float = 1e-2
@@ -89,7 +94,7 @@ LR_DECAY_FACTOR: float = 1e-2
 
 VAL_SPLIT: float = 0.05
 SEED: int = 42
-NUM_WORKERS: int = 4
+NUM_WORKERS: int = 11
 
 # Default threshold for multi-label prediction probabilities.
 TH_MULTI_LABEL: float = 0.5
@@ -160,14 +165,26 @@ def build_run_output_dir(root: Path, model_name: str, started_at: datetime) -> t
 
 
 def build_tensorboard_run_name(run_id: str) -> str:
+    lr_token = (
+        f"d{tokenize_float(BACKBONE_BASE_LR, precision=6)}-{tokenize_float(HEAD_BASE_LR, precision=6)}"
+        if USE_DIFFERENTIAL_LR
+        else f"s{tokenize_float(LEARNING_RATE, precision=6)}"
+    )
+    unfreeze_epoch_token = str(UNFREEZE_BACKBONE_EPOCH) if FREEZE_BACKBONE_AT_START else "na"
+    unfreeze_layers_token = "all" if UNFREEZE_LAST_N_BACKBONE_LAYERS is None else str(UNFREEZE_LAST_N_BACKBONE_LAYERS)
+    run_suffix = run_id.split("_")[-1]
     return (
-        f"{MODEL_NAME}"
-        f"_ep{NUM_EPOCHS}"
-        f"_bs{TRAIN_BATCH_SIZE_FROZEN}to{TRAIN_BATCH_SIZE_UNFROZEN}"
-        f"_ga{GRAD_ACCUM_STEPS_FROZEN}to{GRAD_ACCUM_STEPS_UNFROZEN}"
-        f"_uf{UNFREEZE_BACKBONE_EPOCH if FREEZE_BACKBONE_AT_START else 'none'}"
-        f"_lr{'diff' if USE_DIFFERENTIAL_LR else tokenize_float(LEARNING_RATE, precision=6)}"
-        f"_{run_id}"
+        f"e{NUM_EPOCHS}"
+        f"_bs{TRAIN_BATCH_SIZE_FROZEN}-{TRAIN_BATCH_SIZE_UNFROZEN}"
+        f"_ga{GRAD_ACCUM_STEPS_FROZEN}-{GRAD_ACCUM_STEPS_UNFROZEN}"
+        f"_frz{int(FREEZE_BACKBONE_AT_START)}"
+        f"_ufep{unfreeze_epoch_token}"
+        f"_ufn{unfreeze_layers_token}"
+        f"_lr{lr_token}"
+        f"_vs{tokenize_float(VAL_SPLIT, precision=3)}"
+        f"_sd{SEED}"
+        f"_amp{int(USE_AMP)}"
+        f"_{run_suffix}"
     )
 
 
@@ -290,7 +307,7 @@ def main() -> None:
     run_model_path = run_output_dir / ACTIVE_CHECKPOINT_FILENAME
     run_config_path = run_output_dir / RUN_CONFIG_FILENAME
     run_confusion_matrix_path = run_output_dir / RUN_CONFUSION_MATRIX_FILENAME
-    tensorboard_runs_root = TRAINED_MODELS_ROOT / TENSORBOARD_RUNS_DIRNAME
+    tensorboard_runs_root = TRAINED_MODELS_ROOT / TENSORBOARD_RUNS_DIRNAME / MODEL_NAME
     tensorboard_run_name = build_tensorboard_run_name(run_id)
     tensorboard_log_dir = tensorboard_runs_root / tensorboard_run_name
 
@@ -380,6 +397,32 @@ def main() -> None:
     scheduler = build_scheduler(optimizer)
     scaler = torch.amp.GradScaler("cuda") if USE_AMP and device.type == "cuda" else None
 
+    tensorboard_hparams = {
+        "model_name": MODEL_NAME,
+        "epochs": NUM_EPOCHS,
+        "train_batch_size_frozen": TRAIN_BATCH_SIZE_FROZEN,
+        "train_batch_size_unfrozen": TRAIN_BATCH_SIZE_UNFROZEN,
+        "val_batch_size": VAL_BATCH_SIZE,
+        "grad_accum_steps_frozen": GRAD_ACCUM_STEPS_FROZEN,
+        "grad_accum_steps_unfrozen": GRAD_ACCUM_STEPS_UNFROZEN,
+        "use_amp": USE_AMP,
+        "freeze_backbone_at_start": FREEZE_BACKBONE_AT_START,
+        "unfreeze_backbone_epoch": UNFREEZE_BACKBONE_EPOCH if FREEZE_BACKBONE_AT_START else -1,
+        "unfreeze_last_n_backbone_layers": (
+            "all" if UNFREEZE_LAST_N_BACKBONE_LAYERS is None else UNFREEZE_LAST_N_BACKBONE_LAYERS
+        ),
+        "use_differential_lr": USE_DIFFERENTIAL_LR,
+        "learning_rate": LEARNING_RATE if not USE_DIFFERENTIAL_LR else -1.0,
+        "backbone_base_lr": BACKBONE_BASE_LR if USE_DIFFERENTIAL_LR else -1.0,
+        "head_base_lr": HEAD_BASE_LR if USE_DIFFERENTIAL_LR else -1.0,
+        "lr_milestones": ",".join(str(value) for value in LR_MILESTONES) if LR_MILESTONES else "none",
+        "lr_decay_factor": LR_DECAY_FACTOR,
+        "val_split": VAL_SPLIT,
+        "threshold_init": TH_MULTI_LABEL,
+        "seed": SEED,
+        "num_workers": NUM_WORKERS,
+    }
+
     pos_weight = compute_pos_weight(train_set, NUM_CLASSES).to(device)
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
@@ -399,6 +442,12 @@ def main() -> None:
     if USE_TENSORBOARD and TENSORBOARD_AVAILABLE:
         tensorboard_log_dir.mkdir(parents=True, exist_ok=True)
         summary_writer = SummaryWriter(log_dir=str(tensorboard_log_dir))
+        configure_custom_scalar_layout(summary_writer, lr_group_count=len(optimizer.param_groups))
+        log_run_configuration(
+            summary_writer,
+            run_name=f"{MODEL_NAME}/{tensorboard_run_name}",
+            run_config=tensorboard_hparams,
+        )
 
     backbone_is_unfrozen = not FREEZE_BACKBONE_AT_START
     for epoch in range(NUM_EPOCHS):
@@ -499,7 +548,7 @@ def main() -> None:
                 mbatch_losses=mbatch_losses or [],
             )
             for lr_group_index, param_group in enumerate(optimizer.param_groups):
-                summary_writer.add_scalar(f"LR/Group{lr_group_index}", float(param_group["lr"]), epoch_index)
+                summary_writer.add_scalar(f"LR/group_{lr_group_index}", float(param_group["lr"]), epoch_index)
 
         if val_results is not None:
             current_metric = float(val_results[METRIC_F1])
@@ -600,10 +649,9 @@ def main() -> None:
             apply_sigmoid=True,
         )
 
-    if summary_writer:
-        summary_writer.close()
-
     if run_best_checkpoint is None:
+        if summary_writer:
+            summary_writer.close()
         print("No validation results were produced; no checkpoint saved.")
         return
 
@@ -787,6 +835,22 @@ def main() -> None:
         "active_checkpoint_path": MODEL_PATH,
     }
     print_section("TRAINING SUMMARY", summary_items)
+
+    if summary_writer:
+        log_hparams_summary(
+            summary_writer,
+            hparams=tensorboard_hparams,
+            metrics={
+                "hparams/best_val_f1": float(selected_val_f1),
+                "hparams/best_val_loss": float(run_best_checkpoint.get(CKPT_BEST_VAL_LOSS, 0.0)),
+                "hparams/best_val_accuracy": float(run_best_checkpoint.get(CKPT_BEST_VAL_ACCURACY, 0.0)),
+                "hparams/best_val_precision": float(run_best_checkpoint.get(CKPT_BEST_VAL_PRECISION, 0.0)),
+                "hparams/best_val_recall": float(run_best_checkpoint.get(CKPT_BEST_VAL_RECALL, 0.0)),
+                "hparams/selected_train_f1_eval": float(selected_train_f1),
+                "hparams/completed_epochs": float(completed_epochs),
+            },
+        )
+        summary_writer.close()
 
 
 if __name__ == "__main__":
