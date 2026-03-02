@@ -19,6 +19,7 @@ from dataset_readers import COCOTrainImageDataset
 from generate_confusion_matrix import generate_missing_confusion_matrices_for_runs
 from metadata_utils import checkpoint_inference_threshold
 from models_factory import AVAILABLE_MODELS, create_model, freeze_all, unfreeze_last_n_backbone_layers
+from testing import generate_missing_predictions_for_runs
 from references import (
     CKPT_BEST_EPOCH,
     CKPT_BEST_THRESHOLD,
@@ -78,7 +79,7 @@ VAL_EVERY_N_EPOCHS: int = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
 FREEZE_BACKBONE_AT_START: bool = FREEZE_BACKBONE
-UNFREEZE_BACKBONE_EPOCH: int = 5  # 1-based epoch index; ignored when not freezing at start.
+UNFREEZE_BACKBONE_EPOCH: int = 1  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
 UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = None
 
@@ -111,6 +112,7 @@ ACTIVE_CHECKPOINT_FILENAME: str = BEST_MODEL_PATH.name
 MODEL_PATH: Path = TRAINED_MODELS_ROOT / ACTIVE_CHECKPOINT_FILENAME
 RUN_CONFIG_FILENAME: str = "run_config.json"
 RUN_CONFUSION_MATRIX_FILENAME: str = "confusion_matrix.png"
+RUN_PREDICTIONS_FILENAME: str = "predictions.json"
 TENSORBOARD_RUNS_DIRNAME: str = "tensorboard_runs"
 
 
@@ -307,6 +309,7 @@ def main() -> None:
     run_model_path = run_output_dir / ACTIVE_CHECKPOINT_FILENAME
     run_config_path = run_output_dir / RUN_CONFIG_FILENAME
     run_confusion_matrix_path = run_output_dir / RUN_CONFUSION_MATRIX_FILENAME
+    run_predictions_path = run_output_dir / RUN_PREDICTIONS_FILENAME
     tensorboard_runs_root = TRAINED_MODELS_ROOT / TENSORBOARD_RUNS_DIRNAME / MODEL_NAME
     tensorboard_run_name = build_tensorboard_run_name(run_id)
     tensorboard_log_dir = tensorboard_runs_root / tensorboard_run_name
@@ -352,6 +355,7 @@ def main() -> None:
         "run_model_path": run_model_path,
         "run_config_path": run_config_path,
         "run_confusion_matrix_path": run_confusion_matrix_path,
+        "run_predictions_path": run_predictions_path,
         "tensorboard_log_dir": tensorboard_log_dir,
         "active_checkpoint_filename": ACTIVE_CHECKPOINT_FILENAME,
         "active_checkpoint_path": MODEL_PATH,
@@ -721,6 +725,40 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         confusion_matrix_error = str(exc)
 
+    run_predictions_existed_before = run_predictions_path.exists()
+    predictions_error = None
+    predictions_summary = None
+    predictions_batch_summary = None
+    try:
+        predictions_batch_summary = generate_missing_predictions_for_runs(
+            runs_root=TRAINED_MODELS_ROOT,
+            checkpoint_filename=ACTIVE_CHECKPOINT_FILENAME,
+            predictions_filename=RUN_PREDICTIONS_FILENAME,
+            overwrite=False,
+            batch_size=VAL_BATCH_SIZE,
+            num_workers=NUM_WORKERS,
+            th_multi_label=TH_MULTI_LABEL,
+        )
+        run_entry = None
+        for item in predictions_batch_summary.get("runs", []):
+            if item.get("checkpoint_path") == str(run_model_path):
+                run_entry = item
+                break
+
+        if run_entry is not None:
+            predictions_summary = run_entry
+        else:
+            predictions_summary = {
+                "checkpoint_path": str(run_model_path),
+                "output_path": str(run_predictions_path),
+                "model_name": MODEL_NAME,
+                "generated": run_predictions_path.exists() and not run_predictions_existed_before,
+                "skipped_existing": run_predictions_existed_before,
+                "error": None,
+            }
+    except Exception as exc:  # noqa: BLE001
+        predictions_error = str(exc)
+
     run_finished_at = datetime.now(timezone.utc)
     run_duration_seconds = round((run_finished_at - run_started_at).total_seconds(), 3)
     run_best_checkpoint["run_finished_at_utc"] = run_finished_at.isoformat()
@@ -740,6 +778,7 @@ def main() -> None:
             "run_output_dir": run_output_dir,
             "run_checkpoint_path": run_model_path,
             "run_confusion_matrix_path": run_confusion_matrix_path,
+            "run_predictions_path": run_predictions_path,
             "active_checkpoint_path": MODEL_PATH,
         },
         "configuration": {
@@ -811,6 +850,12 @@ def main() -> None:
             "confusion_matrix_batch_summary": confusion_matrix_batch_summary,
             "confusion_matrix_summary": confusion_matrix_summary,
             "confusion_matrix_error": confusion_matrix_error,
+            "predictions_file": run_predictions_path.name,
+            "predictions_generated": bool(predictions_summary.get("generated")) if predictions_summary else False,
+            "predictions_exists": run_predictions_path.exists(),
+            "predictions_batch_summary": predictions_batch_summary,
+            "predictions_summary": predictions_summary,
+            "predictions_error": predictions_error,
             "tensorboard_log_dir": tensorboard_log_dir,
         },
     }
@@ -832,6 +877,7 @@ def main() -> None:
         "run_confusion_matrix_path": (
             run_confusion_matrix_path if confusion_matrix_error is None else f"FAILED ({confusion_matrix_error})"
         ),
+        "run_predictions_path": run_predictions_path if predictions_error is None else f"FAILED ({predictions_error})",
         "active_checkpoint_path": MODEL_PATH,
     }
     print_section("TRAINING SUMMARY", summary_items)
