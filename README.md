@@ -2,21 +2,35 @@
 
 PyTorch project for 80-class multi-label image classification on an MS-COCO-style dataset.
 
-The code uses torchvision pretrained backbones, replaces the final classifier with `Linear -> BatchNorm1d`, trains with `BCEWithLogitsLoss` (with computed `pos_weight`), tunes threshold on validation, and exports test predictions to JSON.
+The training pipeline uses torchvision pretrained backbones, replaces the classifier head with `Linear -> BatchNorm1d`, trains with `BCEWithLogitsLoss` using class-balanced `pos_weight`, tunes threshold on validation, and writes run artifacts under `trained_models/`.
 
 ## Repository Contents
 
-- `training.py`: train/validation pipeline; writes run folder artifacts (`best_model.pt`, `run_config.json`, `confusion_matrix.png`).
-- `testing.py`: loads checkpoint and exports test predictions JSON.
-- `generate_confusion_matrix.py`: confusion matrix utilities (`generate`, `ensure-if-missing`, and batch generation for run folders).
-- `model_performance_table.py`: aggregates run metadata (prefers `run_config.json`) and writes CSV.
-- `config.py`: dataset paths, class list, base defaults.
-- `models_factory.py`: model registry and classifier-head replacement.
+- `training.py`: train/validation pipeline, checkpointing, TensorBoard logging, run metadata export, and post-training artifact generation.
+- `testing.py`: prediction generation (`predictions.json`) for all run folders by default.
+- `generate_confusion_matrix.py`: confusion matrix generation for all run folders by default.
+- `model_performance_table.py`: aggregates run metadata into `trained_models/model_performance_table.csv`.
+- `config.py`: dataset paths, class names, active model name, and global defaults.
+- `models_factory.py`: backbone registry and classifier-head replacement.
 - `dataset_readers.py`: train/test dataset loaders.
-- `utils.py`: train/validation loops and progress bar.
-- `tensorboard_logging.py`: TensorBoard helper.
-- `sync_pretrained_model_cache.py`: downloads all registered model weights and prunes stale cached files.
-- `get_common_classes.py`, `find_head_path.py`: helper scripts.
+- `tensorboard_logging.py`: TensorBoard scalar layout and hparams logging helpers.
+- `REPORT.md`: project report with evaluation and analysis.
+- `report_images/`: plots used in the report.
+- `trained_models/`: run artifacts and TensorBoard event files (details below).
+
+## Included Runs and Artifacts
+
+Some trained model runs are already included in this repository (the same ones discussed in `REPORT.md`).
+
+Checkpoint `.pt` files are too large for normal repository hosting, so they are git-ignored (`*.pt` in `.gitignore`) and may be missing when you clone.
+
+For the included runs, useful artifacts are available in `trained_models/`, including:
+
+- `run_config.json` (configuration + results metadata)
+- `confusion_matrix.png`
+- `predictions.json`
+- TensorBoard event files under `trained_models/tensorboard_runs/`
+- aggregated CSV table `trained_models/model_performance_table.csv`
 
 ## Supported Backbones
 
@@ -40,38 +54,7 @@ From `models_factory.py` (`MODEL_SPECS`):
 - `swin_v2_t`
 - `swin_v2_s`
 - `swin_v2_b`
-
-## Default Paths and Dataset Layout
-
-Defaults are defined in `config.py`:
-
-- Local data root: `~/ms-coco`
-- Dataset root: `~/ms-coco/ms-coco-dataset`
-- Pretrained cache root: `~/ms-coco/pre-trained_models`
-- Trained models root: `<repo>/trained_models`
-
-Expected dataset structure:
-
-```text
-~/ms-coco/
-`-- ms-coco-dataset/
-    |-- images/
-    |   |-- train-resized/   # train images (.jpg)
-    |   `-- test-resized/    # test images (.jpg)
-    `-- labels/
-        `-- train/           # one .cls file per train image
-
-<repo>/
-`-- trained_models/
-    |-- best_model.pt                        # active/latest checkpoint for testing.py
-    |-- <model_name>_<YYYYMMDD-HHMMSS>/
-    |   |-- best_model.pt
-    |   |-- run_config.json
-    |   `-- confusion_matrix.png
-    `-- ...
-```
-
-Each `*.cls` file must contain one class index per line (0-79), matching `config.py::CLASSES`.
+- `vit_b_16`
 
 ## Installation
 
@@ -85,38 +68,81 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Configuration
+## Dataset Layout
 
-### `config.py` (global defaults)
+Defaults are defined in `config.py`:
 
-- `MODEL_NAME`: selected model name.
-- `BEST_MODEL_PATH`: active checkpoint path (`trained_models/best_model.pt`).
-- `FREEZE_BACKBONE`: starting freeze state used by `training.py`.
-- `LOCAL_FOLDER`, `DATASET_FOLDER`, `PRETRAINED_MODELS_FOLDER`, `TRAINED_MODELS_FOLDER`.
-- `NUM_CLASSES` and `CLASSES`.
+- `LOCAL_FOLDER = ~/ms-coco`
+- `DATASET_FOLDER = ~/ms-coco/ms-coco-dataset`
+- `PRETRAINED_MODELS_FOLDER = ~/ms-coco/pre-trained_models`
+- `TRAINED_MODELS_FOLDER = <repo>/trained_models`
 
-### `training.py` (runtime knobs)
+Expected structure:
 
-Key defaults include:
+```text
+~/ms-coco/
+`-- ms-coco-dataset/
+    |-- images/
+    |   |-- train-resized/   # train images (.jpg)
+    |   `-- test-resized/    # test images (.jpg)
+    `-- labels/
+        `-- train/           # one .cls file per train image
+```
 
-- Epochs/batching: `NUM_EPOCHS=25`, `TRAIN_BATCH_SIZE_FROZEN=256`, `TRAIN_BATCH_SIZE_UNFROZEN=16`, `VAL_BATCH_SIZE=256`.
-- Gradient accumulation: `GRAD_ACCUM_STEPS_FROZEN=1`, `GRAD_ACCUM_STEPS_UNFROZEN=4`.
-- AMP: `USE_AMP=True`, `AMP_DTYPE=torch.float16` (CUDA only).
-- Freeze schedule: start from `FREEZE_BACKBONE`, unfreeze at `UNFREEZE_BACKBONE_EPOCH=1`.
-- Partial unfreeze option: `UNFREEZE_LAST_N_BACKBONE_LAYERS=None` (full unfreeze).
-- LR schedule: differential LR enabled by default (`BACKBONE_BASE_LR=1e-5`, `HEAD_BASE_LR=1e-4`), milestones `(9,)`, decay `1e-2`.
-- Data split: `VAL_SPLIT=0.05`, `SEED=42`, `NUM_WORKERS=4`.
-- Threshold tuning candidates: `0.05 ... 0.95` step `0.05`.
-- Early stopping config present but disabled by default.
-- TensorBoard disabled by default (`USE_TENSORBOARD=False`).
+Each `.cls` file must contain one class index per line (`0..79`) matching `config.py::CLASSES`.
 
-### `testing.py` (runtime knobs)
+## Current Runtime Defaults
 
-- `BATCH_SIZE=32`
-- `NUM_WORKERS=0`
-- `TH_MULTI_LABEL=0.5` (used only if checkpoint does not provide thresholds)
-- `MODEL_PATH=BEST_MODEL_PATH`
-- `OUTPUT_PATH=Path("predictions.json")` (base name; final file includes metadata tokens)
+### `config.py`
+
+- `MODEL_NAME = "convnext_tiny"` (active assignment)
+- `FREEZE_BACKBONE = True`
+- `BEST_MODEL_PATH = trained_models/best_model.pt`
+
+### `training.py`
+
+- `NUM_EPOCHS = 14`
+- `TRAIN_BATCH_SIZE_FROZEN = 32`
+- `TRAIN_BATCH_SIZE_UNFROZEN = 16`
+- `VAL_BATCH_SIZE = 32`
+- `GRAD_ACCUM_STEPS_FROZEN = 1`
+- `GRAD_ACCUM_STEPS_UNFROZEN = 1`
+- `USE_AMP = True`
+- `FREEZE_BACKBONE_AT_START = True`
+- `UNFREEZE_BACKBONE_EPOCH = 1`
+- `UNFREEZE_LAST_N_BACKBONE_LAYERS = None` (full unfreeze)
+- differential LR enabled:
+  - `BACKBONE_BASE_LR = 1e-5`
+  - `HEAD_BASE_LR = 1e-4`
+  - `LR_MILESTONES = (5, 10)`
+  - `LR_DECAY_FACTOR = 1e-2`
+- `VAL_SPLIT = 0.05`
+- `SEED = 42`
+- `NUM_WORKERS = 10`
+- early stopping enabled:
+  - `EARLY_STOPPING_ENABLED = True`
+  - `EARLY_STOPPING_PATIENCE = 4`
+  - `EARLY_STOPPING_MIN_DELTA = 0.0`
+- TensorBoard enabled: `USE_TENSORBOARD = True`
+
+### `testing.py`
+
+- `GENERATE_FOR_ALL_RUNS = True` (default behavior)
+- `BATCH_SIZE = 32`
+- `NUM_WORKERS = 0`
+- `TH_MULTI_LABEL = 0.5`
+- `OVERWRITE_EXISTING = False`
+
+### `generate_confusion_matrix.py`
+
+- `GENERATE_FOR_ALL_RUNS = True` (default behavior)
+- `SPLIT = "val"`
+- `VAL_SPLIT = 0.05`
+- `BATCH_SIZE = 64`
+- `NUM_WORKERS = 0`
+- `NORMALIZE = "rows"`
+- `TOP_K_CLASSES = 40`
+- `OVERWRITE_EXISTING = False`
 
 ## Training
 
@@ -124,69 +150,56 @@ Key defaults include:
 python training.py
 ```
 
-What happens:
+What training does:
 
-- Loads selected pretrained backbone and replaces classifier head.
-- Splits train data into train/val subsets (`random_split`, seeded).
-- Computes class-balanced `pos_weight` from the train subset.
-- Trains with optional freeze/unfreeze schedule and gradient accumulation.
-- Tunes threshold on validation using weighted multi-label F1.
-- Tracks run-best checkpoint by validation F1 for this run.
-- Creates a run folder: `trained_models/<model_name>_<timestamp>/`.
-- Saves:
-  - `best_model.pt`
-  - `run_config.json` (full run configuration + results + artifact paths)
-  - `confusion_matrix.png` (generated if missing)
-- Updates `trained_models/best_model.pt` as active checkpoint for `testing.py`.
+- creates a run folder: `trained_models/<model_name>_<timestamp>/`
+- saves `best_model.pt` in the run folder
+- updates active checkpoint `trained_models/best_model.pt`
+- writes `run_config.json` with configuration/results/artifact metadata
+- ensures missing confusion matrices for run folders
+- ensures missing predictions for run folders
+- logs TensorBoard scalars and hparams to:
+  - `trained_models/tensorboard_runs/<model_name>/<run_name>/`
 
-TensorBoard:
+Launch TensorBoard:
 
-1. Set `USE_TENSORBOARD = True` in `training.py`.
-2. Run `tensorboard --logdir runs`.
+```bash
+tensorboard --logdir trained_models/tensorboard_runs
+```
 
-## Inference / Test Prediction
+## Prediction Generation
 
 ```bash
 python testing.py
 ```
 
-What happens:
+Default behavior:
 
-- Loads checkpoint from `MODEL_PATH`.
-- Rebuilds model using `checkpoint["model_name"]` (fallback: `config.MODEL_NAME`).
-- Uses inference threshold in this order: `best_threshold` -> `th_multi_label` -> `testing.py::TH_MULTI_LABEL`.
-- Writes predictions as `{image_id: [class_indices...]}` JSON.
-- Output filename is expanded with metadata (model/F1/epoch/train settings/test settings), e.g. `predictions_<...>.json`.
+- scans `trained_models/**/best_model.pt`
+- writes missing `predictions.json` per run folder
+- skips existing prediction files unless `OVERWRITE_EXISTING=True`
 
-## Confusion Matrix
+Fallback behavior:
+
+- if no run folders are found, it runs single-checkpoint inference using `MODEL_PATH`.
+
+## Confusion Matrix Generation
 
 ```bash
 python generate_confusion_matrix.py
 ```
 
-`generate_confusion_matrix.py` now supports two workflows:
+Default behavior:
 
-1. Batch mode (default): scan run folders in `trained_models/` and generate missing `confusion_matrix.png` per run.
-2. Single-checkpoint mode: ensure/generate matrix for `MODEL_PATH` (fallback when no run folders are found).
+- scans `trained_models/**/best_model.pt`
+- writes missing `confusion_matrix.png` per run folder
+- skips existing confusion matrices unless `OVERWRITE_EXISTING=True`
 
-Key script-level constants:
+Fallback behavior:
 
-- `SPLIT`: `"val"`, `"train"`, or `"all"`
-- `VAL_SPLIT`, `SEED`, `BATCH_SIZE`, `NUM_WORKERS`
-- `TH_MULTI_LABEL` (`None` => checkpoint threshold fallback)
-- `NORMALIZE`: `"none"`, `"rows"`, `"all"`
-- `TOP_K_CLASSES` (`0` renders all classes)
-- `GENERATE_FOR_ALL_RUNS`: batch mode switch
-- `RUN_CHECKPOINT_FILENAME`, `RUN_CONFUSION_MATRIX_FILENAME`
-- `OVERWRITE_EXISTING`: if `False`, existing matrices are kept
+- if no run folders are found, it generates one matrix for `MODEL_PATH`.
 
-Developer API in `generate_confusion_matrix.py`:
-
-- `generate_confusion_matrix_for_checkpoint(...)`: always generate.
-- `ensure_confusion_matrix_for_checkpoint(...)`: generate only if missing.
-- `generate_missing_confusion_matrices_for_runs(...)`: batch fill missing matrices.
-
-## Checkpoint Report Table
+## Model Performance Table
 
 ```bash
 python model_performance_table.py
@@ -194,28 +207,10 @@ python model_performance_table.py
 
 Behavior:
 
-- Recursively loads `run_config.json` from `trained_models` (preferred source).
-- Falls back to checkpoint metadata if no run configs are found.
-- Drops heavy `state_dict` payload and non-F1 metric columns.
-- Optional grouping/sorting via top-of-file constants.
-- Writes CSV to `<trained_models>/model_performance_table.csv`.
-
-## Pretrained Cache Sync
-
-```bash
-python sync_pretrained_model_cache.py
-```
-
-Behavior:
-
-- Iterates all models in `MODEL_SPECS` and downloads/loads their default weights.
-- Uses `PRETRAINED_MODELS_FOLDER` as torch hub cache root.
-- Removes stale `.pt/.pth` files not referenced by current registry URLs.
-
-## Utility Scripts
-
-- `python get_common_classes.py`: prints overlap between `config.CLASSES` and weight metadata categories.
-- `python find_head_path.py`: quick helper for discovering the last linear head path in a torchvision model.
+- prefers `trained_models/**/run_config.json` as source
+- falls back to checkpoints if run configs are unavailable
+- writes `trained_models/model_performance_table.csv`
+- includes model identity/path and key metrics/runtime columns
 
 ## Prediction JSON Format
 
@@ -226,4 +221,4 @@ Behavior:
 }
 ```
 
-Keys are image filenames without `.jpg`; values are predicted class indices.
+Keys are image filenames without `.jpg`, values are predicted class indices.

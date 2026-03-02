@@ -4,3 +4,4 @@ pillow
 pandas
 matplotlib
 tensorboard
+scikit-learn
