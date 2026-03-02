@@ -2,14 +2,14 @@
 
 **Student**: Lancelot Tariot Camille, Sang Nguyen
 
-## Table of Content
+## Table of Contents
 
 - [I. Introduction](#i-introduction)
-- [II. Model Benchmarking](#ii-model-benchmarking-and-performance)
+- [II. Model Benchmarking](#ii-model-benchmarking)
 - [III. Model Architecture](#iii-model-architecture)
 - [IV. Model Training](#iv-model-training)
 - [V. Model Inference](#v-model-inference)
-- [VI. Evaluation Metrics](#vi-evaluation-metrics)
+- [VI. Evaluation Metrics and Analysis](#vi-evaluation-metrics-and-analysis)
 - [VII. Conclusion](#vii-conclusion)
 
 ## I. Introduction
@@ -59,9 +59,9 @@ Below is a summary of the best-performing configurations:
 
 Based on the summary in the previous table, we can see that ConvNeXt Base and Small achieved the best performance in terms of validation F1 score, while the Tiny versions train faster but have lower F1 scores.
 
-## Therefore, to balance accuracy and training cost, we decided to use four backbones for the main training: ConvNeXt, Mobile Net, Swing Transformer, RegNet.
+To balance accuracy and training cost, we decided to use four backbones for the main training: ConvNeXt, MobileNet, Swin Transformer, and RegNet.
 
-## IV. Model Architecture
+## III. Model Architecture
 
 Before proceeding with the training using the four selected backbones, we first present an overview of the architectural features of these models. Each backbone has distinct design principles that influence its capacity, computational cost, and suitability for multi-label classification:
 
@@ -97,7 +97,7 @@ RegNet addresses this by attaching a Regulator Module to the ResNet backbone. Th
 
 Understanding these architectural differences allows us to interpret their performance during training and provides insights into how they handle multi-label predictions on MS-COCO.
 
-## V. Model Training
+## IV. Model Training
 
 ### 1. Model Training and Configuration
 
@@ -159,7 +159,7 @@ Optionally, training and validation metrics can be logged to TensorBoard by sett
 
 ---
 
-## VI. Model Inference
+## V. Model Inference
 
 ### 1. Model Inference and Configuration
 
@@ -197,7 +197,7 @@ python testing.py
 
 ---
 
-## VII. Evaluation Metrics and Analysis
+## VI. Evaluation Metrics and Analysis
 
 The following runs were evaluated from the folders under `trained_models/`. The analysis combines the F1 evolution curves from `report_images/` (train versus validation dynamics) and the official platform metrics (accuracy, F1, precision, recall) reported after submission. Extensive run-level metrics and artifacts are available in each run folder (`trained_models/<run_name>/`) and in TensorBoard (`trained_models/tensorboard_runs/`).
 
@@ -211,19 +211,33 @@ All runs used differential learning rates with `backbone learning rate = 1e-5` a
 
 Run `convnext_small_20260302-085858` (`convnext-small-f1.png`) used `unfreeze_backbone_epoch = 5` and `unfreeze_last_n_backbone_layers = all` (full backbone unfreeze). The train and validation F1 curves increase steadily from roughly 0.50 and then plateau near 0.61 (train) and 0.60 (validation), with a relatively small gap. The runtime recorded in `run_config.json` is `6263.378` seconds (~104.4 minutes). On the platform, this run achieved accuracy `0.5248`, F1 `0.5904`, precision `0.4785`, and recall `0.7708`, indicating a stable but recall-oriented configuration.
 
+![ConvNeXt Small training and validation F1 across epochs](report_images/convnext-small-f1.png)
+
 Run `convnext_tiny_20260302-122332` (`convnext-tiny-f1-full-unfrozen-epoch-1.png`) used `unfreeze_backbone_epoch = 1` and `unfreeze_last_n_backbone_layers = all` (full backbone unfreeze). This run shows the strongest training growth and the largest train/validation gap, which is consistent with overfitting behavior in the curve. The runtime recorded in `run_config.json` is `4550.052` seconds (~75.8 minutes). Despite that, it produced the best official scores among all tested models: accuracy `0.5585`, F1 `0.6086`, precision `0.5041`, and recall `0.7679`.
+
+![ConvNeXt Tiny full backbone unfreeze at epoch 1: training and validation F1 across epochs](report_images/convnext-tiny-f1-full-unfrozen-epoch-1.png)
 
 Run `convnext_tiny_20260301-194510` (`convnext-tiny-f1-full-unfrozen-epoch-5.png`) used `unfreeze_backbone_epoch = 5` and `unfreeze_last_n_backbone_layers = all`. Compared with epoch-1 full unfreeze, the progression is smoother and less unstable, with a smaller generalization gap. The runtime recorded in `run_config.json` is `2865.583` seconds (~47.8 minutes). The platform results were accuracy `0.5079`, F1 `0.5944`, precision `0.5128`, and recall `0.7070`.
 
-Run `convnext_tiny_20260301-134646` (`convnext-tiny-f1-3-layers-unfrozen.png`) used `unfreeze_backbone_epoch = 5` and `unfreeze_last_n_backbone_layers = 3`. Its curves are stable and consistent, with lower divergence than full unfreeze and a moderate plateau. The runtime recorded in `run_config.json` is `3289.848` seconds (~54.8 minutes). Platform results were accuracy `0.4919`, F1 `0.5931`, precision `0.5328`, and recall `0.6688`. This is the highest-precision ConvNeXt run, with lower recall than the full-unfreeze variants.
+![ConvNeXt Tiny full backbone unfreeze at epoch 5: training and validation F1 across epochs](report_images/convnext-tiny-f1-full-unfrozen-epoch-5.png)
+
+Run `convnext_tiny_20260301-134646` (`convnext-tiny-f1-3-layers-unfrozen.png`) used `unfreeze_backbone_epoch = 5` and `unfreeze_last_n_backbone_layers = 3`. Its curves are stable and consistent, with lower divergence than full unfreeze and a moderate plateau. The runtime recorded in `run_config.json` is `3289.848` seconds (~54.8 minutes), which is slower than the epoch-5 full-unfreeze ConvNeXt Tiny run (`2865.583` seconds). The reason is that this partial-unfreeze run plateaued later, so with early stopping enabled it still required more effective epochs before termination. Platform results were accuracy `0.4919`, F1 `0.5931`, precision `0.5328`, and recall `0.6688`. This is the highest-precision ConvNeXt run, with lower recall than the full-unfreeze variants.
+
+![ConvNeXt Tiny with 3 unfrozen backbone layers at epoch 5: training and validation F1 across epochs](report_images/convnext-tiny-f1-3-layers-unfrozen.png)
 
 #### Swin / RegNet / MobileNet
 
 Run `swin_v2_t_20260301-144143` (`swint-f1.png`) used `unfreeze_backbone_epoch = 5` and `unfreeze_last_n_backbone_layers = 3`. The model converged smoothly with moderate gap and good stability. The runtime recorded in `run_config.json` is `5702.213` seconds (~95.0 minutes). Platform metrics were accuracy `0.4765`, F1 `0.5835`, precision `0.4956`, and recall `0.7093`, placing it below ConvNeXt but clearly above RegNet and MobileNet on F1.
 
+![Swin V2 Tiny with 3 unfrozen backbone layers at epoch 5: training and validation F1 across epochs](report_images/swint-f1.png)
+
 Run `regnet_y_800mf_20260301-161704` (`regnet-f1.png`) used `unfreeze_backbone_epoch = 5` and `unfreeze_last_n_backbone_layers = 5`. The curves rise steadily but saturate at lower values than ConvNeXt/Swin. The runtime recorded in `run_config.json` is `1879.095` seconds (~31.3 minutes). Platform results were accuracy `0.3794`, F1 `0.5173`, precision `0.4974`, and recall `0.5389`.
 
+![RegNet Y 800MF with 5 unfrozen backbone layers at epoch 5: training and validation F1 across epochs](report_images/regnet-f1.png)
+
 Run `mobilenet_v3_large_20260301-164829` (`mobilenet-f1.png`) also used `unfreeze_backbone_epoch = 5` and `unfreeze_last_n_backbone_layers = 5`. It converged smoothly but remained the weakest run overall in both curve level and platform metrics. The runtime recorded in `run_config.json` is `1238.668` seconds (~20.6 minutes), which is also the fastest among the compared models. Platform metrics were accuracy `0.3252`, F1 `0.4896`, precision `0.5076`, and recall `0.4728`.
+
+![MobileNet V3 Large with 5 unfrozen backbone layers at epoch 5: training and validation F1 across epochs](report_images/mobilenet-f1.png)
 
 Overall, the aggregate plot (`f1-score.png`) and platform results are aligned: ConvNeXt variants are strongest, Swin is competitive but lower, and RegNet/MobileNet are clearly behind on final F1.
 
@@ -231,15 +245,15 @@ Overall, the aggregate plot (`f1-score.png`) and platform results are aligned: C
 
 Official challenge metrics per run:
 
-| Run folder | Run description | Runtime (s) | Accuracy | F1 | Precision | Recall |
-| --- | --- | --- | --- | --- | --- | --- |
-| `convnext_small_20260302-085858` | ConvNeXt Small, Unfreeze all backbone layers at epoch 5 | 6263.378 | 0.5248 | 0.5904 | 0.4785 | 0.7708 |
-| `convnext_tiny_20260302-122332` | ConvNeXt Tiny, Unfreeze all backbone layers at epoch 1 | 4550.052 | 0.5585 | 0.6086 | 0.5041 | 0.7679 |
-| `convnext_tiny_20260301-194510` | ConvNeXt Tiny, Unfreeze all backbone layers at epoch 5 | 2865.583 | 0.5079 | 0.5944 | 0.5128 | 0.7070 |
-| `convnext_tiny_20260301-134646` | ConvNeXt Tiny, Unfreeze 3 backbone layers at epoch 5 | 3289.848 | 0.4919 | 0.5931 | 0.5328 | 0.6688 |
-| `swin_v2_t_20260301-144143` | Swin V2 Tiny, Unfreeze 3 backbone layers at epoch 5 | 5702.213 | 0.4765 | 0.5835 | 0.4956 | 0.7093 |
-| `regnet_y_800mf_20260301-161704` | RegNet Y 800MF, Unfreeze 5 backbone layers at epoch 5 | 1879.095 | 0.3794 | 0.5173 | 0.4974 | 0.5389 |
-| `mobilenet_v3_large_20260301-164829` | MobileNet V3 Large, Unfreeze 5 backbone layers at epoch 5 | 1238.668 | 0.3252 | 0.4896 | 0.5076 | 0.4728 |
+| Run folder                           | Run description                                           | Runtime (s) | Accuracy | F1     | Precision | Recall |
+| ------------------------------------ | --------------------------------------------------------- | ----------- | -------- | ------ | --------- | ------ |
+| `convnext_small_20260302-085858`     | ConvNeXt Small, Unfreeze all backbone layers at epoch 5   | 6263.378    | 0.5248   | 0.5904 | 0.4785    | 0.7708 |
+| `convnext_tiny_20260302-122332`      | ConvNeXt Tiny, Unfreeze all backbone layers at epoch 1    | 4550.052    | 0.5585   | 0.6086 | 0.5041    | 0.7679 |
+| `convnext_tiny_20260301-194510`      | ConvNeXt Tiny, Unfreeze all backbone layers at epoch 5    | 2865.583    | 0.5079   | 0.5944 | 0.5128    | 0.7070 |
+| `convnext_tiny_20260301-134646`      | ConvNeXt Tiny, Unfreeze 3 backbone layers at epoch 5      | 3289.848    | 0.4919   | 0.5931 | 0.5328    | 0.6688 |
+| `swin_v2_t_20260301-144143`          | Swin V2 Tiny, Unfreeze 3 backbone layers at epoch 5       | 5702.213    | 0.4765   | 0.5835 | 0.4956    | 0.7093 |
+| `regnet_y_800mf_20260301-161704`     | RegNet Y 800MF, Unfreeze 5 backbone layers at epoch 5     | 1879.095    | 0.3794   | 0.5173 | 0.4974    | 0.5389 |
+| `mobilenet_v3_large_20260301-164829` | MobileNet V3 Large, Unfreeze 5 backbone layers at epoch 5 | 1238.668    | 0.3252   | 0.4896 | 0.5076    | 0.4728 |
 
 ### 4. F1 versus Runtime Trade-off
 
@@ -251,6 +265,6 @@ A practical compromise is **ConvNeXt Tiny with full backbone unfreeze at epoch 5
 
 For the final submission, we select the model with the highest platform F1 score, since leaderboard ranking is driven primarily by F1. In our experiments, this corresponds to **ConvNeXt Tiny with full backbone unfreezing at epoch 1** (`F1 = 0.6086`). Nevertheless, alternative models may be preferred under different objectives, such as shorter runtime, higher precision, or stronger stability/generalization behavior.
 
-## VIII. Conclusion
+## VII. Conclusion
 
 ---
