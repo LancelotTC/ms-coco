@@ -3,6 +3,7 @@
 **Student**: Lancelot Tariot Camille, Sang Nguyen
 
 ## Table of Content
+
 - [I. Introduction](#i-introduction)
 - [II. Model Benchmarking](#ii-model-benchmarking-and-performance)
 - [III. Model Architecture](#iii-model-architecture)
@@ -10,7 +11,6 @@
 - [V. Model Inference](#v-model-inference)
 - [VI. Evaluation Metrics](#vi-evaluation-metrics)
 - [VII. Conclusion](#vii-conclusion)
-
 
 ## I. Introduction
 
@@ -27,6 +27,7 @@ We prioritize models that strike a balance between predictive performance and co
 In this project, we addressed the challenge of multi-label image classification on the MS-COCO dataset, where each image can contain multiple object categories simultaneously. This requires the model to predict several classes per image, rather than a single label.
 
 To solve this, we adopted a transfer learning approach using a variety of state-of-the-art convolutional neural network backbones from torchvision:
+
 - ConvNeXt (tiny, small, base, large)
 - Swin Transformer (swin_t, swin_v2_t, etc.)
 - ResNet (resnet18, resnet50)
@@ -45,32 +46,54 @@ The model selection and head replacement logic is implemented in `models_factory
 
 Below is a summary of the best-performing configurations:
 
-| # | Model Architecture        | Best Val F1 | Best Epoch | Total Epochs | Learning Rate | Unfrozen Batch | Training Time |
-|---|---------------------------|------------|------------|--------------|--------------|---------------|------------|
-| 0 | ConvNeXt Base             | 0.633600   | 17         | 25           | 1.0e-07      | 8             | ?          |
-| 1 | ConvNeXt Small            | 0.632600   | 25         | 25           | 1.0e-07      | 16            | ?          |
-| 2 | ConvNeXt Tiny (v1)        | 0.624100   | 15         | 18           | 1.0e-06      | 16            | ?          |
-| 3 | ConvNeXt Tiny (v2)        | 0.618100   | 14         | 25           | 1.0e-07      | 16            | ?          |
-| 4 | ConvNeXt Tiny (v3)        | 0.609600   | 14         | 18           | 1.0e-06      | 32            | ?          |
-| 5 | ConvNeXt Tiny (v4)        | 0.571800   | 17         | 18           | 1.0e-06      | 256           | ?          |
+| #   | Model Architecture | Best Val F1 | Best Epoch | Total Epochs | Learning Rate | Unfrozen Batch | Training Time |
+| --- | ------------------ | ----------- | ---------- | ------------ | ------------- | -------------- | ------------- |
+| 0   | ConvNeXt Base      | 0.633600    | 17         | 25           | 1.0e-07       | 8              | ?             |
+| 1   | ConvNeXt Small     | 0.632600    | 25         | 25           | 1.0e-07       | 16             | ?             |
+| 2   | ConvNeXt Tiny (v1) | 0.624100    | 15         | 18           | 1.0e-06       | 16             | ?             |
+| 3   | ConvNeXt Tiny (v2) | 0.618100    | 14         | 25           | 1.0e-07       | 16             | ?             |
+| 4   | ConvNeXt Tiny (v3) | 0.609600    | 14         | 18           | 1.0e-06       | 32             | ?             |
+| 5   | ConvNeXt Tiny (v4) | 0.571800    | 17         | 18           | 1.0e-06       | 256            | ?             |
 
 ### 3. Model Selection
-Based on the summary in the previous table, we can see that ConvNeXt Base and Small achieved the best performance in terms of validation F1 score, while the Tiny versions train faster but have lower F1 scores. 
 
-Therefore, to balance accuracy and training cost, we decided to use four backbones for the main training: ConvNeXt, Mobile Net, Swing Transformer, RegNet.
----
+Based on the summary in the previous table, we can see that ConvNeXt Base and Small achieved the best performance in terms of validation F1 score, while the Tiny versions train faster but have lower F1 scores.
+
+## Therefore, to balance accuracy and training cost, we decided to use four backbones for the main training: ConvNeXt, Mobile Net, Swing Transformer, RegNet.
 
 ## IV. Model Architecture
 
 Before proceeding with the training using the four selected backbones, we first present an overview of the architectural features of these models. Each backbone has distinct design principles that influence its capacity, computational cost, and suitability for multi-label classification:
-// gpt generated
-ConvNeXt – A modernized convolutional architecture inspired by Transformer design, featuring inverted bottlenecks, large kernel sizes, and improved normalization schemes for better performance on image classification tasks.
 
-MobileNet – A lightweight convolutional model optimized for efficiency and speed, using depthwise separable convolutions to reduce the number of parameters while maintaining reasonable accuracy.
+#### MobileNet: Optimizing for Computational Efficiency
 
-Swin Transformer – A hierarchical Vision Transformer that processes images using shifted windows, enabling both global and local context modeling with reduced computational complexity compared to standard Transformers.
+While traditional models like VGG and ResNet are highly accurate, they require massive computational power. MobileNet is explicitly engineered for environments with limited resources, such as mobile phones or embedded devices.
 
-RegNet – A family of network designs with regularized width and depth configurations, offering a balance between model size, speed, and accuracy for large-scale image classification.
+To achieve this, MobileNet replaces standard, heavy convolutions with depthwise separable convolutions. A standard convolution filters and combines inputs in a single, expensive step. MobileNet splits this into two lighter steps:
+
+- Depthwise Convolution: Applies a single filter to each color channel independently.
+
+- Pointwise Convolution (1x1): Linearly combines the outputs of the first step.
+
+By decoupling the filtering and combining phases, MobileNet drastically reduces the number of calculations required, resulting in a highly efficient and fast model.
+
+#### Swin Transformer: Mastering Scale and Resolution
+
+Standard Vision Transformers look at the entire image at once (global self-attention). While powerful, this requires an immense amount of computation for high-resolution images. The Swin Transformer solves this by reintroducing the hierarchical structure of a CNN into the Transformer framework.
+
+It achieves this via a Shifted Window mechanism. Instead of computing attention globally, the Swin Transformer computes it locally within small, non-overlapping windows. To ensure the network still understands the "big picture," the window boundaries are shifted in consecutive layers, allowing information to pass between adjacent windows. Additionally, it gradually merges image patches in deeper layers to build a hierarchical feature map, much like the pooling layers in a ResNet.
+
+#### ConvNeXt: The Modernized Pure ConvNet
+
+Following the massive success of Vision Transformers, ConvNeXt was developed to see if a purely convolutional network could achieve the same performance if designed with modern techniques.
+
+Internally, ConvNeXt simply takes a standard ResNet architecture and incrementally updates it using design principles borrowed from the Swin Transformer. These updates include using larger kernel sizes (e.g., 7x7) to "see" larger parts of the image at once, changing the hidden layer structures, and using modernized normalization techniques. ConvNeXt proves that pure convolutions can still compete with complex self-attention mechanisms while remaining simpler to implement.
+
+#### RegNet: Enhancing Feature Retention via Recurrent Memory
+
+In a standard ResNet, the shortcut (residual) connections help gradients flow, which allows us to train very deep networks. However, because these connections simply add previous outputs to current ones, the network can easily overwrite or "forget" complementary spatial features from earlier layers as it gets deeper.
+
+RegNet addresses this by attaching a Regulator Module to the ResNet backbone. This module is built using Convolutional Recurrent Neural Networks (RNNs). In this context, the RNN acts as a spatio-temporal memory bank. It continuously extracts and holds onto important complementary features from earlier layers, feeding them back into the network to prevent information loss as the image is processed deeper into the model.
 
 Understanding these architectural differences allows us to interpret their performance during training and provides insights into how they handle multi-label predictions on MS-COCO.
 
@@ -105,6 +128,7 @@ Training starts with the backbone frozen `(FREEZE_BACKBONE=True by default)`, al
 **Learning Rate and Scheduling**
 
 Differential learning rates are used:
+
 - Backbone: `BACKBONE_BASE_LR=1e-5`
 - Head: `HEAD_BASE_LR=1e-4`
 - The learning rate scheduler uses milestones at epoch 9 (`MILESTONES=(9,)`) with a decay factor of `1e-2`.
@@ -128,6 +152,7 @@ The optimal multi-label threshold is tuned on the validation set by evaluating w
 Optionally, training and validation metrics can be logged to TensorBoard by setting `USE_TENSORBOARD=True` in training.py.
 
 **Other Settings**
+
 - Number of epochs: `NUM_EPOCHS=25`
 - Number of workers for data loading: `NUM_WORKERS=4` (increase the value of this parameter to reduce the training time)
 - Early stopping is implemented but disabled by default.
@@ -151,6 +176,7 @@ Test images are processed in batches with a default batch size of 32 (BATCH_SIZE
 **Threshold Selection**
 
 The inference threshold for multi-label prediction is determined in the following order of precedence:
+
 - best_threshold saved in the checkpoint (if available)
 - th_multi_label argument (if provided)
 - Default value in `testing.py`: 0.5 (`TH_MULTI_LABEL=0.5`)
@@ -172,8 +198,6 @@ python testing.py
 ---
 
 ## VII. Evaluation Metrics and Analysis
-
-
 
 ## VIII. Conclusion
 
