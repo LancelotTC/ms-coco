@@ -6,13 +6,6 @@ METRIC_ACCURACY: Final[str] = "accuracy"
 METRIC_F1: Final[str] = "f1"
 METRIC_PRECISION: Final[str] = "precision"
 METRIC_RECALL: Final[str] = "recall"
-METRIC_KEYS: Final[tuple[str, ...]] = (
-    METRIC_LOSS,
-    METRIC_ACCURACY,
-    METRIC_F1,
-    METRIC_PRECISION,
-    METRIC_RECALL,
-)
 
 # Checkpoint keys
 CKPT_MODEL_NAME: Final[str] = "model_name"
@@ -31,4 +24,3 @@ CKPT_BATCH_SIZE: Final[str] = "batch_size"
 CKPT_LEARNING_RATE: Final[str] = "learning_rate"
 CKPT_LEARNING_RATES: Final[str] = "learning_rates"
 CKPT_RUN_DURATION_SECONDS: Final[str] = "run_duration_seconds"
-

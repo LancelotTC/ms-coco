@@ -278,7 +278,7 @@ def generate_missing_predictions_for_runs(
     failures: list[dict[str, str]] = []
     runs: list[dict[str, object]] = []
 
-    for index, checkpoint_path in enumerate(checkpoint_paths, start=1):
+    for checkpoint_path in checkpoint_paths:
         output_path = checkpoint_path.parent / predictions_filename
         try:
             summary = ensure_predictions_for_checkpoint(
