@@ -22,6 +22,19 @@ SORT_ASCENDING = False
 GROUP_BY_COLUMNS: list[str] = []  # Example: ["run.model_name"] or ["configuration.freeze_backbone_at_start"]
 GROUP_MODE = "best"  # Options: "best", "mean"
 OUTPUT_CSV_NAME = "model_performance_table.csv"
+OUTPUT_COLUMNS: list[str] = [
+    "model_name",
+    "model_path_relative",
+    "results.best_val_f1",
+    "results.best_val_accuracy",
+    "results.best_val_precision",
+    "results.best_val_recall",
+    "run.duration_seconds",
+    "results.completed_epochs",
+    "configuration.learning_rate",
+    "configuration.lr_decay_factor",
+    "configuration.lr_milestones",
+]
 
 
 def _flatten_dict(data: dict[str, object], prefix: str = "") -> dict[str, object]:
@@ -139,6 +152,84 @@ def _normalize_metric_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _normalize_config_columns(df: pd.DataFrame) -> pd.DataFrame:
+    mappings = {
+        "results.completed_epochs": ("results.completed_epochs", "completed_epochs"),
+        "configuration.learning_rate": ("configuration.learning_rate", "learning_rate"),
+        "configuration.lr_decay_factor": ("configuration.lr_decay_factor", "lr_decay_factor"),
+        "configuration.lr_milestones": ("configuration.lr_milestones", "lr_milestones"),
+    }
+    for target, candidates in mappings.items():
+        if target not in df.columns:
+            for candidate in candidates:
+                if candidate in df.columns:
+                    df[target] = df[candidate]
+                    break
+        if target not in df.columns:
+            df[target] = pd.NA
+
+    if "configuration.learning_rate" in df.columns:
+        missing_lr = df["configuration.learning_rate"].isna()
+        has_backbone = "configuration.backbone_base_lr" in df.columns
+        has_head = "configuration.head_base_lr" in df.columns
+        if has_backbone and has_head:
+            both_present = df["configuration.backbone_base_lr"].notna() & df["configuration.head_base_lr"].notna()
+            fill_mask = missing_lr & both_present
+            df.loc[fill_mask, "configuration.learning_rate"] = (
+                df.loc[fill_mask, "configuration.backbone_base_lr"].astype(str)
+                + "/"
+                + df.loc[fill_mask, "configuration.head_base_lr"].astype(str)
+            )
+    return df
+
+
+def _to_relative_model_path(path_value: object, root: Path) -> object:
+    if path_value is None or (isinstance(path_value, float) and pd.isna(path_value)):
+        return pd.NA
+    text = str(path_value)
+    if not text:
+        return pd.NA
+    path = Path(text)
+    if not path.is_absolute():
+        return str(path).replace("\\", "/")
+
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+        return str(relative).replace("\\", "/")
+    except Exception:
+        return str(path).replace("\\", "/")
+
+
+def _normalize_identity_columns(df: pd.DataFrame, *, root: Path) -> pd.DataFrame:
+    model_name_candidates = ("run.model_name", "model_name", "configuration.model_name")
+    if "model_name" not in df.columns:
+        for candidate in model_name_candidates:
+            if candidate in df.columns:
+                df["model_name"] = df[candidate]
+                break
+    if "model_name" not in df.columns:
+        df["model_name"] = pd.NA
+
+    checkpoint_path_candidates = ("paths.run_checkpoint_path", "checkpoint_path")
+    checkpoint_path_source = None
+    for candidate in checkpoint_path_candidates:
+        if candidate in df.columns:
+            checkpoint_path_source = candidate
+            break
+    if checkpoint_path_source is None:
+        df["model_path_relative"] = pd.NA
+    else:
+        df["model_path_relative"] = df[checkpoint_path_source].apply(lambda value: _to_relative_model_path(value, root))
+    return df
+
+
+def _select_output_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for column in OUTPUT_COLUMNS:
+        if column not in df.columns:
+            df[column] = pd.NA
+    return df[OUTPUT_COLUMNS]
+
+
 def _resolve_sort_column(df: pd.DataFrame) -> str | None:
     candidates = [SORT_BY]
     if SORT_BY != "results.best_val_f1":
@@ -180,6 +271,8 @@ def main() -> None:
     df = pd.DataFrame(rows)
     df = _normalize_epoch_columns(df)
     df = _normalize_metric_columns(df)
+    df = _normalize_config_columns(df)
+    df = _normalize_identity_columns(df, root=root)
     sort_column = _resolve_sort_column(df)
     if sort_column is None:
         print(f"Sort column '{SORT_BY}' not found. Grouping/ordering will be unsorted.")
@@ -187,6 +280,7 @@ def main() -> None:
 
     if sort_column is not None:
         df = df.sort_values(sort_column, ascending=SORT_ASCENDING)
+    df = _select_output_columns(df)
 
     output_csv_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_csv_path, index=False)
