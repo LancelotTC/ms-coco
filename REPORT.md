@@ -14,6 +14,13 @@
 
 ## I. Introduction
 
+
+The MS COCO multi-label classification challenge focuses on building models that can recognize multiple object categories in each MS COCO image. It emphasizes multi-label classification, transfer learning, and submitting predictions in the required format for leaderboard evaluation.
+
+**But what does a “good” model actually mean in the context of this project?**
+
+Instead of relying purely on leaderboard scores, we define a good model based on our own practical constraints and objectives.
+
 In the context of multi-label image classification, a `good` model is often defined by its ability to achieve high predictive performance, typically measured by metrics such as the F1 score. However, in practical applications, a high F1 score alone is not always sufficient to determine the overall quality or suitability of a model. Other important factors include `model complexity`, `inference speed`, `training time`, and `resource efficiency`.
 
 For this project, our goal is to identify models that not only deliver sufficiently high accuracy and F1 scores, but also maintain a lightweight architecture and fast training times.
@@ -22,7 +29,7 @@ We prioritize models that strike a balance between predictive performance and co
 
 ## II. Model Benchmarking
 
-### 1. Model selection for benchmarking
+### 1. Benchmarking of multiple models
 
 In this project, we addressed the challenge of multi-label image classification on the MS-COCO dataset, where each image can contain multiple object categories simultaneously. This requires the model to predict several classes per image, rather than a single label.
 
@@ -42,24 +49,22 @@ This design enables the model to output independent logits for each class, makin
 
 The model selection and head replacement logic is implemented in `models_factory.py`, which ensures compatibility with different backbones and allows easy switching between architectures.
 
-### 2. Summary of the Result
+### 2. Summary of Benchmarking Result
 
-Below is a summary of the best-performing configurations:
+After benchmarking a wide range of backbone architectures under the same training setup, we compared their validation performance and computational cost.
 
-| #   | Model Architecture | Best Val F1 | Best Epoch | Total Epochs | Learning Rate | Unfrozen Batch | Training Time |
-| --- | ------------------ | ----------- | ---------- | ------------ | ------------- | -------------- | ------------- |
-| 0   | ConvNeXt Base      | 0.633600    | 17         | 25           | 1.0e-07       | 8              | ?             |
-| 1   | ConvNeXt Small     | 0.632600    | 25         | 25           | 1.0e-07       | 16             | ?             |
-| 2   | ConvNeXt Tiny (v1) | 0.624100    | 15         | 18           | 1.0e-06       | 16             | ?             |
-| 3   | ConvNeXt Tiny (v2) | 0.618100    | 14         | 25           | 1.0e-07       | 16             | ?             |
-| 4   | ConvNeXt Tiny (v3) | 0.609600    | 14         | 18           | 1.0e-06       | 32             | ?             |
-| 5   | ConvNeXt Tiny (v4) | 0.571800    | 17         | 18           | 1.0e-06       | 256            | ?             |
+The table below presents the most balanced configurations in terms of F1 score, precision–recall trade-off, and training duration. These models achieved relatively strong predictive performance while maintaining reasonable training time, making them suitable candidates according to our project-specific definition of a “good” model.
 
-### 3. Model Selection
+| Model               | Best Val F1 | Precision | Recall | Accuracy | Val Loss | Epochs | Duration (ms) |
+|---------------------|------------|-----------|--------|----------|----------|--------|--------------|
+| convnext_small      | 0.6192     | 0.5374    | 0.7303 | 0.4986   | 0.5265   | 11     | 6263378      |
+| convnext_tiny (1)   | 0.6033     | 0.5458    | 0.6743 | 0.4590   | 0.5409   | 9      | 2865583      |
+| convnext_tiny (2)   | 0.5995     | 0.5371    | 0.6783 | 0.4923   | 0.5143   | 14     | 3289848      |
+| swin_v2_t           | 0.5866     | 0.5423    | 0.6388 | 0.4241   | 0.5088   | 13     | 5702213      |
+| regnet_y_800mf      | 0.5245     | 0.5237    | 0.5253 | 0.3886   | 0.5694   | 14     | 1879095      |
+| mobilenet_v3_large  | 0.5160     | 0.5164    | 0.5157 | 0.3445   | 0.5805   | 12     | 1238668      |
 
-Based on the summary in the previous table, we can see that ConvNeXt Base and Small achieved the best performance in terms of validation F1 score, while the Tiny versions train faster but have lower F1 scores.
-
-To balance accuracy and training cost, we decided to use four backbones for the main training: ConvNeXt, MobileNet, Swin Transformer, and RegNet.
+ConvNeXt Small achieved the highest F1 score, while the Tiny versions trained faster but with slightly lower F1. To balance accuracy and training cost, we selected four backbones for the main training: ConvNeXt, MobileNet, Swin Transformer, and RegNet.
 
 ## III. Model Architecture
 
@@ -157,8 +162,6 @@ Optionally, training and validation metrics can be logged to TensorBoard by sett
 - Number of workers for data loading: `NUM_WORKERS=4` (increase the value of this parameter to reduce the training time)
 - Early stopping is implemented but disabled by default.
 
----
-
 ## V. Model Inference
 
 ### 1. Model Inference and Configuration
@@ -186,16 +189,6 @@ The inference threshold for multi-label prediction is determined in the followin
 Predictions are saved in a JSON file, mapping each image ID (filename without extension) to a list of predicted class indices.
 
 The output filename is automatically expanded with metadata tokens (model name, F1 score, epoch, training and test settings) for traceability. The base output path is predictions.json (OUTPUT_PATH=Path("predictions.json")).
-
-### 3. Running Inference
-
-You can run inference from this jupyter notebook or from terminal.
-
-```bash
-python testing.py
-```
-
----
 
 ## VI. Evaluation Metrics and Analysis
 
@@ -266,5 +259,8 @@ A practical compromise is **ConvNeXt Tiny with full backbone unfreeze at epoch 5
 For the final submission, we select the model with the highest platform F1 score, since leaderboard ranking is driven primarily by F1. In our experiments, this corresponds to **ConvNeXt Tiny with full backbone unfreezing at epoch 1** (`F1 = 0.6086`). Nevertheless, alternative models may be preferred under different objectives, such as shorter runtime, higher precision, or stronger stability/generalization behavior.
 
 ## VII. Conclusion
+`ConvNeXt` variants consistently achieved the strongest performance on the MS-COCO multi-label task. ConvNeXt Tiny with full backbone unfreeze at epoch 1 gave the highest F1 (`0.6086`) and accuracy (`0.5585`), making it the best choice for leaderboard ranking.
 
----
+For practical trade-offs, models like ConvNeXt Tiny (freezed at epoch 5) or ConvNeXt Tiny with partial unfreeze offer slightly lower F1 but better stability, precision, and reduced runtime. Swin, RegNet, and MobileNet performed well but lag behind in predictive performance.
+
+Overall, selecting a backbone involves balancing F1, runtime, and training stability depending on project priorities.
