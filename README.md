@@ -2,39 +2,40 @@
 
 PyTorch project for 80-class multi-label image classification on an MS-COCO-style dataset.
 
-The training pipeline uses torchvision pretrained backbones, replaces the classifier head with `Linear -> BatchNorm1d`, trains with `BCEWithLogitsLoss` using class-balanced `pos_weight`, tunes threshold on validation, and writes run artifacts under `trained_models/`.
+The project keeps `training.py` and `testing.py` at the repository root. Support modules and utility scripts are organized under the `utils/` package.
 
-## Repository Contents
+## Repository Structure
 
-- `training.py`: train/validation pipeline, checkpointing, TensorBoard logging, run metadata export, and post-training artifact generation.
-- `testing.py`: prediction generation (`predictions.json`) for all run folders by default.
-- `generate_confusion_matrix.py`: confusion matrix generation for all run folders by default.
-- `model_performance_table.py`: aggregates run metadata into `trained_models/model_performance_table.csv`.
-- `config.py`: dataset paths, class names, active model name, and global defaults.
-- `models_factory.py`: backbone registry and classifier-head replacement.
-- `dataset_readers.py`: train/test dataset loaders.
-- `tensorboard_logging.py`: TensorBoard scalar layout and hparams logging helpers.
-- `REPORT.md`: project report with evaluation and analysis.
-- `report_images/`: plots used in the report.
-- `trained_models/`: run artifacts and TensorBoard event files (details below).
+- `training.py`: training/validation pipeline, checkpointing, TensorBoard logging, and post-training artifact generation.
+- `testing.py`: prediction generation for all run folders by default.
+- `utils/config.py`: global paths, classes, and model defaults.
+- `utils/models_factory.py`: backbone registry and classifier-head replacement.
+- `utils/dataset_readers.py`: train/test dataset loaders.
+- `utils/training_utils.py`: training/validation loops and helpers.
+- `utils/generate_confusion_matrix.py`: confusion-matrix generation utilities (single run and batch mode).
+- `utils/model_performance_table.py`: aggregate run metadata into CSV.
+- `utils/tensorboard_logging.py`, `utils/references.py`, `utils/metadata_utils.py`: logging/metadata/constants helpers.
+- `report_images/`: report figures.
+- `trained_models/`: run artifacts, predictions, TensorBoard event files, and summary table.
+- `REPORT.md`: project report.
 
 ## Included Runs and Artifacts
 
-Some trained model runs are already included in this repository (the same ones discussed in `REPORT.md`).
+Some trained runs are already included in the repository (the same runs discussed in `REPORT.md`).
 
-Checkpoint `.pt` files are too large for normal repository hosting, so they are git-ignored (`*.pt` in `.gitignore`) and may be missing when you clone.
+Large checkpoint files (`*.pt`) are git-ignored and may not be present in a fresh clone.
 
-For the included runs, useful artifacts are available in `trained_models/`, including:
+For included runs, the repository still provides useful artifacts in `trained_models/`, including:
 
-- `run_config.json` (configuration + results metadata)
+- `run_config.json` (configuration + results + runtime metadata)
 - `confusion_matrix.png`
 - `predictions.json`
 - TensorBoard event files under `trained_models/tensorboard_runs/`
-- aggregated CSV table `trained_models/model_performance_table.csv`
+- `trained_models/model_performance_table.csv`
 
 ## Supported Backbones
 
-From `models_factory.py` (`MODEL_SPECS`):
+From `utils/models_factory.py` (`MODEL_SPECS`):
 
 - `resnet18`
 - `resnet50`
@@ -68,32 +69,33 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Dataset Layout
+## Paths and Dataset Layout
 
-Defaults are defined in `config.py`:
+Paths are now project-local (no user home directory dependency):
 
-- `LOCAL_FOLDER = ~/ms-coco`
-- `DATASET_FOLDER = ~/ms-coco/ms-coco-dataset`
-- `PRETRAINED_MODELS_FOLDER = ~/ms-coco/pre-trained_models`
+- `DATASET_FOLDER = <repo>/ms-coco`
+- `PRETRAINED_MODELS_FOLDER = <repo>/pre-trained_models`
 - `TRAINED_MODELS_FOLDER = <repo>/trained_models`
 
-Expected structure:
+Expected dataset structure:
 
 ```text
-~/ms-coco/
-`-- ms-coco-dataset/
-    |-- images/
-    |   |-- train-resized/   # train images (.jpg)
-    |   `-- test-resized/    # test images (.jpg)
-    `-- labels/
-        `-- train/           # one .cls file per train image
+<repo>/
+|-- ms-coco/
+|   |-- images/
+|   |   |-- train-resized/   # train images (.jpg)
+|   |   `-- test-resized/    # test images (.jpg)
+|   `-- labels/
+|       `-- train/           # one .cls file per train image
+|-- pre-trained_models/
+`-- trained_models/
 ```
 
-Each `.cls` file must contain one class index per line (`0..79`) matching `config.py::CLASSES`.
+Each `.cls` file contains one class index per line (`0..79`) matching `utils/config.py::CLASSES`.
 
 ## Current Runtime Defaults
 
-### `config.py`
+### `utils/config.py`
 
 - `MODEL_NAME = "convnext_tiny"` (active assignment)
 - `FREEZE_BACKBONE = True`
@@ -107,35 +109,30 @@ Each `.cls` file must contain one class index per line (`0..79`) matching `confi
 - `VAL_BATCH_SIZE = 32`
 - `GRAD_ACCUM_STEPS_FROZEN = 1`
 - `GRAD_ACCUM_STEPS_UNFROZEN = 1`
-- `USE_AMP = True`
-- `FREEZE_BACKBONE_AT_START = True`
 - `UNFREEZE_BACKBONE_EPOCH = 1`
-- `UNFREEZE_LAST_N_BACKBONE_LAYERS = None` (full unfreeze)
-- differential LR enabled:
-  - `BACKBONE_BASE_LR = 1e-5`
-  - `HEAD_BASE_LR = 1e-4`
-  - `LR_MILESTONES = (5, 10)`
-  - `LR_DECAY_FACTOR = 1e-2`
+- `UNFREEZE_LAST_N_BACKBONE_LAYERS = None`
+- differential LR:
+    - `BACKBONE_BASE_LR = 1e-5`
+    - `HEAD_BASE_LR = 1e-4`
+    - `LR_MILESTONES = (5, 10)`
+    - `LR_DECAY_FACTOR = 1e-2`
 - `VAL_SPLIT = 0.05`
 - `SEED = 42`
 - `NUM_WORKERS = 10`
-- early stopping enabled:
-  - `EARLY_STOPPING_ENABLED = True`
-  - `EARLY_STOPPING_PATIENCE = 4`
-  - `EARLY_STOPPING_MIN_DELTA = 0.0`
-- TensorBoard enabled: `USE_TENSORBOARD = True`
+- early stopping enabled (`patience = 4`, `min_delta = 0.0`)
+- TensorBoard enabled (`USE_TENSORBOARD = True`)
 
 ### `testing.py`
 
-- `GENERATE_FOR_ALL_RUNS = True` (default behavior)
+- `GENERATE_FOR_ALL_RUNS = True`
 - `BATCH_SIZE = 32`
 - `NUM_WORKERS = 0`
 - `TH_MULTI_LABEL = 0.5`
 - `OVERWRITE_EXISTING = False`
 
-### `generate_confusion_matrix.py`
+### `utils/generate_confusion_matrix.py`
 
-- `GENERATE_FOR_ALL_RUNS = True` (default behavior)
+- `GENERATE_FOR_ALL_RUNS = True`
 - `SPLIT = "val"`
 - `VAL_SPLIT = 0.05`
 - `BATCH_SIZE = 64`
@@ -150,16 +147,14 @@ Each `.cls` file must contain one class index per line (`0..79`) matching `confi
 python training.py
 ```
 
-What training does:
+Training creates/updates:
 
-- creates a run folder: `trained_models/<model_name>_<timestamp>/`
-- saves `best_model.pt` in the run folder
-- updates active checkpoint `trained_models/best_model.pt`
-- writes `run_config.json` with configuration/results/artifact metadata
-- ensures missing confusion matrices for run folders
-- ensures missing predictions for run folders
-- logs TensorBoard scalars and hparams to:
-  - `trained_models/tensorboard_runs/<model_name>/<run_name>/`
+- `trained_models/<model_name>_<timestamp>/best_model.pt`
+- `trained_models/<model_name>_<timestamp>/run_config.json`
+- `trained_models/<model_name>_<timestamp>/confusion_matrix.png` (generated if missing)
+- `trained_models/<model_name>_<timestamp>/predictions.json` (generated if missing)
+- `trained_models/best_model.pt` (active checkpoint)
+- TensorBoard logs in `trained_models/tensorboard_runs/<model_name>/<run_name>/`
 
 Launch TensorBoard:
 
@@ -173,44 +168,23 @@ tensorboard --logdir trained_models/tensorboard_runs
 python testing.py
 ```
 
-Default behavior:
-
-- scans `trained_models/**/best_model.pt`
-- writes missing `predictions.json` per run folder
-- skips existing prediction files unless `OVERWRITE_EXISTING=True`
-
-Fallback behavior:
-
-- if no run folders are found, it runs single-checkpoint inference using `MODEL_PATH`.
+Default behavior scans `trained_models/**/best_model.pt` and writes missing `predictions.json` files per run.
 
 ## Confusion Matrix Generation
 
 ```bash
-python generate_confusion_matrix.py
+python -m utils.generate_confusion_matrix
 ```
 
-Default behavior:
-
-- scans `trained_models/**/best_model.pt`
-- writes missing `confusion_matrix.png` per run folder
-- skips existing confusion matrices unless `OVERWRITE_EXISTING=True`
-
-Fallback behavior:
-
-- if no run folders are found, it generates one matrix for `MODEL_PATH`.
+Default behavior scans `trained_models/**/best_model.pt` and writes missing `confusion_matrix.png` files per run.
 
 ## Model Performance Table
 
 ```bash
-python model_performance_table.py
+python -m utils.model_performance_table
 ```
 
-Behavior:
-
-- prefers `trained_models/**/run_config.json` as source
-- falls back to checkpoints if run configs are unavailable
-- writes `trained_models/model_performance_table.csv`
-- includes model identity/path and key metrics/runtime columns
+Writes `trained_models/model_performance_table.csv` from run configs (preferred) or checkpoints (fallback).
 
 ## Prediction JSON Format
 
@@ -221,4 +195,4 @@ Behavior:
 }
 ```
 
-Keys are image filenames without `.jpg`, values are predicted class indices.
+Keys are image filenames without `.jpg`; values are predicted class indices.

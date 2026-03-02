@@ -4,12 +4,12 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, random_split
 
-from config import BEST_MODEL_PATH, CLASSES, MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
-from dataset_readers import COCOTrainImageDataset
-from metadata_utils import checkpoint_inference_threshold, checkpoint_model_name
-from models_factory import AVAILABLE_MODELS, MODEL_SPECS, create_model
-from references import CKPT_STATE_DICT
-from utils import ProgressBar, print_section
+from utils.config import BEST_MODEL_PATH, CLASSES, MODEL_NAME, NUM_CLASSES, TRAIN_IMAGES_DIR, TRAIN_LABELS_DIR
+from utils.dataset_readers import COCOTrainImageDataset
+from utils.metadata_utils import checkpoint_inference_threshold, checkpoint_model_name
+from utils.models_factory import AVAILABLE_MODELS, MODEL_SPECS, create_model
+from utils.references import CKPT_STATE_DICT
+from utils.training_utils import ProgressBar, print_section
 
 
 MODEL_PATH = BEST_MODEL_PATH

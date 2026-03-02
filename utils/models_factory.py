@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable
 import torch
 from torchvision import models
 
-from config import PRETRAINED_MODELS_FOLDER
+from utils.config import PRETRAINED_MODELS_FOLDER
 
 
 @dataclass(frozen=True)

@@ -4,17 +4,17 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
-from dataset_readers import COCOTestImageDataset
-from metadata_utils import (
+from utils.config import BEST_MODEL_PATH, MODEL_NAME, NUM_CLASSES, TEST_IMAGES_DIR
+from utils.dataset_readers import COCOTestImageDataset
+from utils.metadata_utils import (
     checkpoint_epoch_token,
     checkpoint_inference_threshold,
     checkpoint_model_name,
     checkpoint_total_epochs,
     epoch_token,
 )
-from models_factory import AVAILABLE_MODELS, create_model
-from references import (
+from utils.models_factory import AVAILABLE_MODELS, create_model
+from utils.references import (
     CKPT_BATCH_SIZE,
     CKPT_BEST_EPOCH,
     CKPT_BEST_THRESHOLD,
@@ -24,7 +24,7 @@ from references import (
     CKPT_STATE_DICT,
     CKPT_THRESHOLD,
 )
-from utils import ProgressBar, print_section, tokenize_float
+from utils.training_utils import ProgressBar, print_section, tokenize_float
 
 
 # Testing configuration.

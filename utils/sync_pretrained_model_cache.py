@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from models_factory import MODEL_SPECS, _configure_pretrained_weights_cache
+from utils.models_factory import MODEL_SPECS, _configure_pretrained_weights_cache
 
 
 @dataclass(slots=True)

@@ -1,4 +1,4 @@
-from references import METRIC_ACCURACY, METRIC_F1, METRIC_LOSS, METRIC_PRECISION, METRIC_RECALL
+from utils.references import METRIC_ACCURACY, METRIC_F1, METRIC_LOSS, METRIC_PRECISION, METRIC_RECALL
 from torch.utils.tensorboard.summary import hparams as build_hparams_summary
 
 
@@ -32,7 +32,9 @@ def log_run_configuration(summary_writer, run_name: str, run_config: dict[str, o
     summary_writer.add_text("Run/configuration", "\n".join(table_lines), 0)
 
 
-def log_hparams_summary(summary_writer, hparams: dict[str, bool | str | float | int], metrics: dict[str, float]) -> None:
+def log_hparams_summary(
+    summary_writer, hparams: dict[str, bool | str | float | int], metrics: dict[str, float]
+) -> None:
     exp, ssi, sei = build_hparams_summary(hparams, metrics)
     file_writer = summary_writer._get_file_writer()  # TensorBoard hparams plugin requires raw summaries.
     file_writer.add_summary(exp)

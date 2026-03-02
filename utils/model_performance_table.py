@@ -3,8 +3,8 @@ from pathlib import Path
 
 import torch
 
-from config import TRAINED_MODELS_FOLDER
-from references import CKPT_STATE_DICT
+from utils.config import TRAINED_MODELS_FOLDER
+from utils.references import CKPT_STATE_DICT
 
 try:
     import pandas as pd

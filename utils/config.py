@@ -1,10 +1,9 @@
 from pathlib import Path
 
-PROJECT_ROOT: Path = Path(__file__).resolve().parent
-LOCAL_FOLDER: Path = Path.home() / "ms-coco"
+PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
-DATASET_FOLDER: Path = LOCAL_FOLDER / "ms-coco-dataset"
-PRETRAINED_MODELS_FOLDER: Path = LOCAL_FOLDER / "pre-trained_models"
+DATASET_FOLDER: Path = PROJECT_ROOT / "ms-coco"
+PRETRAINED_MODELS_FOLDER: Path = PROJECT_ROOT / "pre-trained_models"
 TRAINED_MODELS_FOLDER: Path = PROJECT_ROOT / "trained_models"
 
 IMAGES_DIR: Path = DATASET_FOLDER / "images"
@@ -20,9 +19,9 @@ NUM_CLASSES: int = 80
 MODEL_NAME = "vit_b_16"
 MODEL_NAME = "swin_v2_t"
 MODEL_NAME = "regnet_y_800mf"
-MODEL_NAME = "mobilenet_v3_large"
 MODEL_NAME = "convnext_small"
 MODEL_NAME = "convnext_tiny"
+MODEL_NAME = "mobilenet_v3_large"
 
 BEST_MODEL_PATH: Path = TRAINED_MODELS_FOLDER / "best_model.pt"
 FREEZE_BACKBONE: bool = True

@@ -2,7 +2,7 @@ import os
 
 import torch
 
-from references import METRIC_ACCURACY, METRIC_F1, METRIC_LOSS, METRIC_PRECISION, METRIC_RECALL
+from utils.references import METRIC_ACCURACY, METRIC_F1, METRIC_LOSS, METRIC_PRECISION, METRIC_RECALL
 
 
 def tokenize_float(value: float, precision: int = 4) -> str:

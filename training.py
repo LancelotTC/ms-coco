@@ -7,7 +7,7 @@ from typing import Iterable
 import torch
 from torch.utils.data import DataLoader, random_split
 
-from config import (
+from utils.config import (
     BEST_MODEL_PATH,
     FREEZE_BACKBONE,
     MODEL_NAME,
@@ -15,12 +15,12 @@ from config import (
     TRAIN_IMAGES_DIR,
     TRAIN_LABELS_DIR,
 )
-from dataset_readers import COCOTrainImageDataset
-from generate_confusion_matrix import generate_missing_confusion_matrices_for_runs
-from metadata_utils import checkpoint_inference_threshold
-from models_factory import AVAILABLE_MODELS, create_model, freeze_all, unfreeze_last_n_backbone_layers
+from utils.dataset_readers import COCOTrainImageDataset
+from utils.generate_confusion_matrix import generate_missing_confusion_matrices_for_runs
+from utils.metadata_utils import checkpoint_inference_threshold
+from utils.models_factory import AVAILABLE_MODELS, create_model, freeze_all, unfreeze_last_n_backbone_layers
 from testing import generate_missing_predictions_for_runs
-from references import (
+from utils.references import (
     CKPT_BEST_EPOCH,
     CKPT_BEST_THRESHOLD,
     CKPT_BEST_VAL_ACCURACY,
@@ -42,14 +42,20 @@ from references import (
     METRIC_PRECISION,
     METRIC_RECALL,
 )
-from utils import print_section, tokenize_float, train_loop, tune_threshold_on_validation, validation_loop
+from utils.training_utils import (
+    print_section,
+    tokenize_float,
+    train_loop,
+    tune_threshold_on_validation,
+    validation_loop,
+)
 
 TENSORBOARD_AVAILABLE: bool
 
 try:
     from torch.utils.tensorboard import SummaryWriter
 
-    from tensorboard_logging import (
+    from utils.tensorboard_logging import (
         configure_custom_scalar_layout,
         log_hparams_summary,
         log_run_configuration,
@@ -72,14 +78,14 @@ GRAD_ACCUM_STEPS_UNFROZEN: int = 1
 USE_AMP: bool = True
 AMP_DTYPE: torch.dtype = torch.float16
 
-NUM_EPOCHS: int = 14
+NUM_EPOCHS: int = 1
 
 TRAIN_METRICS_EVERY_N_EPOCHS: int = 1
 VAL_EVERY_N_EPOCHS: int = 1
 
 # Freeze/unfreeze schedule (independent from LR schedule).
 FREEZE_BACKBONE_AT_START: bool = FREEZE_BACKBONE
-UNFREEZE_BACKBONE_EPOCH: int = 1  # 1-based epoch index; ignored when not freezing at start.
+UNFREEZE_BACKBONE_EPOCH: int = 2  # 1-based epoch index; ignored when not freezing at start.
 # None => full backbone unfreeze. Set an integer >= 1 to unfreeze only the last n backbone layers.
 UNFREEZE_LAST_N_BACKBONE_LAYERS: int | None = None
 

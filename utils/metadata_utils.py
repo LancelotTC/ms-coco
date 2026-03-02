@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from typing import Any
 
-from references import (
+from utils.references import (
     CKPT_BEST_EPOCH,
     CKPT_BEST_THRESHOLD,
     CKPT_MODEL_NAME,
@@ -48,4 +48,3 @@ def epoch_token(best_epoch: int | None, total_epochs: int | None) -> str:
     if total_epochs is not None:
         return f"{best_epoch}of{total_epochs}"
     return str(best_epoch)
-
